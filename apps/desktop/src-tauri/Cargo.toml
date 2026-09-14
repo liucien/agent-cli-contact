@@ -1,0 +1,17 @@
+[package]
+name = "agent-workbench"
+version = "0.1.0"
+edition = "2021"
+description = "轻量级 AI Coding 工作台（Tauri 壳 + Gateway sidecar）"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1

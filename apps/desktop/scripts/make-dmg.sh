@@ -12,4 +12,12 @@ cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 hdiutil create -volname "agent-cli-contact" -srcfolder "$STAGE" -ov -format UDZO "$OUT" >/dev/null
 rm -rf "$STAGE"
-echo "DMG: $OUT"
+
+# 产物汇总到仓库根 release/，避免埋在 target 深层目录
+RELEASE="../../release"
+rm -rf "$RELEASE/agent-cli-contact.app"
+mkdir -p "$RELEASE"
+cp -R "$APP" "$RELEASE/"
+cp "$OUT" "$RELEASE/"
+echo "产物已输出到 $(cd "$RELEASE" && pwd)："
+ls -lh "$RELEASE" | awk 'NR>1 {print "  " $NF " (" $5 ")"}'

@@ -20,6 +20,11 @@ export interface Toast {
     text: string;
 }
 
+/** 应用内模态对话框（WKWebView 不支持 window.prompt/confirm） */
+export type DialogState =
+    | { id: number; kind: "prompt"; title: string; defaultValue?: string; placeholder?: string }
+    | { id: number; kind: "confirm"; title: string; body?: string; danger?: boolean };
+
 export interface AppState {
     projection: ShellProjection | null;
     connected: boolean;
@@ -38,6 +43,12 @@ export interface AppState {
     meshPair: [string, string] | null;
     /** setup.install 实时日志（brew 输出，上限 200 行） */
     setupLog: string[];
+    /** compose（一键新建 agent 聊天）进行中的 workspaceId，herdr 启动可达 ~10s */
+    composingWorkspaceId: string | null;
+    /** 递增信号：compose 成功后主区 composer 自动聚焦 */
+    composerFocusSeq: number;
+    /** 当前打开的应用内对话框（一次一个） */
+    dialog: DialogState | null;
 }
 
 let state: AppState = {
@@ -53,6 +64,9 @@ let state: AppState = {
     settingsOpen: false,
     meshPair: null,
     setupLog: [],
+    composingWorkspaceId: null,
+    composerFocusSeq: 0,
+    dialog: null,
 };
 
 const listeners = new Set<() => void>();
@@ -85,6 +99,50 @@ export function toast(level: "info" | "warn", text: string): void {
     setTimeout(() => {
         set({ toasts: state.toasts.filter((t) => t.id !== id) });
     }, 4000);
+}
+
+// ---------- 应用内对话框（替代 window.prompt/confirm，WKWebView 不支持） ----------
+
+let dialogSeq = 0;
+let dialogResolver: ((value: string | boolean | null) => void) | null = null;
+
+function openDialog(dialog: DialogState, resolver: (value: string | boolean | null) => void): void {
+    // 若已有对话框，先按取消收掉，避免悬挂的 Promise
+    dialogResolver?.(null);
+    dialogResolver = resolver;
+    set({ dialog });
+}
+
+/** 文本输入对话框：确认 → trim 后的值（空 → null）；取消/Esc/点击遮罩 → null */
+export function promptDialog(opts: {
+    title: string;
+    defaultValue?: string;
+    placeholder?: string;
+}): Promise<string | null> {
+    return new Promise((resolve) => {
+        openDialog({ id: ++dialogSeq, kind: "prompt", ...opts }, (v) =>
+            resolve(typeof v === "string" && v ? v : null),
+        );
+    });
+}
+
+/** 确认对话框：确认 → true；取消/Esc/点击遮罩 → false */
+export function confirmDialog(opts: {
+    title: string;
+    body?: string;
+    danger?: boolean;
+}): Promise<boolean> {
+    return new Promise((resolve) => {
+        openDialog({ id: ++dialogSeq, kind: "confirm", ...opts }, (v) => resolve(v === true));
+    });
+}
+
+/** Dialog 组件回调：prompt 传 trim 后的值或 null，confirm 传 true/null */
+export function resolveDialog(value: string | boolean | null): void {
+    const resolver = dialogResolver;
+    dialogResolver = null;
+    set({ dialog: null });
+    resolver?.(value);
 }
 
 // ---------- RPC 包装：错误统一弹 toast ----------
@@ -121,14 +179,22 @@ export function createWorkspace(label: string, cwd?: string): void {
     );
 }
 
-export function createAgent(workspaceId: string, name: string): void {
-    const params: AgentCreateParams = { workspaceId, name };
+/** Codex 式一键新建 agent 聊天：自动命名 claude-N，成功后选中并聚焦 composer */
+export function composeAgent(workspaceId: string): void {
+    if (state.composingWorkspaceId) return; // 一次一个
+    const count = state.projection?.agents.filter((a) => a.workspaceId === workspaceId).length ?? 0;
+    const params: AgentCreateParams = { workspaceId, name: `claude-${count + 1}` };
+    set({ composingWorkspaceId: workspaceId });
     call("agent.create", params).then(
         (result) => {
             const agent = result as AgentSnapshot | null;
+            set({
+                composingWorkspaceId: null,
+                composerFocusSeq: state.composerFocusSeq + 1,
+            });
             if (agent?.id) selectAgent(agent.id);
         },
-        () => undefined,
+        () => set({ composingWorkspaceId: null }),
     );
 }
 

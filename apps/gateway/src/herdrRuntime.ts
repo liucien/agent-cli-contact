@@ -7,8 +7,10 @@ import {
     HerdrClient,
     defaultSocketPath,
     type HerdrAgentInfo,
+    type HerdrAgentSessionInfo,
     type HerdrSubscription,
 } from "@agent-cli-contact/herdr-client";
+import { detectClaudeModel } from "./modelDetect.js";
 import type {
     AgentSnapshot,
     WorkspaceSnapshot,
@@ -18,10 +20,12 @@ import type {
 import type { AgentRuntime } from "./runtime.js";
 import { PROVIDER_CAPABILITIES } from "./capabilities.js";
 
+/** herdr agent kind（实测：claude / agy / codex …）→ capability 表的 provider 显示名 */
 const PROVIDER_DISPLAY: Record<string, string> = {
     claude: "Claude Code",
     "claude-code": "Claude Code",
     codex: "Codex",
+    agy: "Antigravity",
     gemini: "Antigravity",
     antigravity: "Antigravity",
 };
@@ -38,7 +42,6 @@ function defaultConfigFor(provider: string): AgentConfig {
 
 interface TrackedAgent {
     snap: AgentSnapshot;
-    terminalId: string;
 }
 
 export class HerdrRuntime implements AgentRuntime {
@@ -51,7 +54,14 @@ export class HerdrRuntime implements AgentRuntime {
     private statusCbs: ((agentId: string, from: string, to: string) => void)[] = [];
     /** gateway 侧记账的配置（herdr 不感知模型/权限，配置真身在 pane 内 CLI） */
     private configs = new Map<string, AgentConfig>();
+    /** agent -> herdr session 引用 + cwd（模型检测用） */
+    private sessions = new Map<
+        string,
+        { session: HerdrAgentSessionInfo | null; cwd: string | null }
+    >();
     private turns = new Map<string, number>();
+    /** herdr workspace.list 不回传 cwd：记住创建时传入的值作兜底 */
+    private cwdHints = new Map<string, string>();
 
     constructor(socketPath = defaultSocketPath()) {
         this.rpc = new HerdrClient(socketPath);
@@ -135,17 +145,26 @@ export class HerdrRuntime implements AgentRuntime {
             const provider = PROVIDER_DISPLAY[providerRaw] ?? info.display_agent ?? providerRaw;
             const prev = this.agents.get(id);
             const config = this.configs.get(id) ?? defaultConfigFor(provider);
+            // provider 检测晚于首次 refresh：缓存里的 unknown 默认值随 provider 就位替换
+            if (config.model === "unknown" && PROVIDER_DISPLAY[providerRaw]) {
+                config.model = defaultConfigFor(provider).model;
+            }
+            // Claude Code：从会话文件读实际模型（herdr 不上报模型），检测结果为准
+            if (info.agent_session?.source === "herdr:claude" && info.cwd) {
+                const detected = detectClaudeModel(info.cwd, info.agent_session.value);
+                if (detected) config.model = detected;
+            }
             this.configs.set(id, config);
+            this.sessions.set(id, { session: info.agent_session ?? null, cwd: info.cwd ?? null });
             next.set(id, {
-                terminalId: info.terminal_id,
                 snap: {
                     id,
-                    name: info.name ?? info.display_agent ?? info.title ?? id,
+                    name: info.name ?? info.display_agent ?? (info.agent ? `${info.agent} · ${info.pane_id}` : id),
                     provider,
                     workspaceId: info.workspace_id,
                     paneId: info.pane_id,
                     status: info.agent_status,
-                    taskSummary: info.title ?? prev?.snap.taskSummary,
+                    taskSummary: info.terminal_title_stripped ?? prev?.snap.taskSummary,
                     turn: this.turns.get(id) ?? prev?.snap.turn ?? 0,
                     config,
                 },
@@ -162,7 +181,11 @@ export class HerdrRuntime implements AgentRuntime {
             id: w.workspace_id,
             label: w.label ?? w.workspace_id,
             focused: w.focused ?? false,
-            cwd: w.cwd ?? undefined,
+            // herdr 不回传 workspace cwd：用其中 agent 的 cwd 推断，其次用创建时记录的值
+            cwd:
+                w.cwd ??
+                list.find((a) => a.workspace_id === w.workspace_id && a.cwd)?.cwd ??
+                this.cwdHints.get(w.workspace_id),
             agentCount: list.filter((a) => a.workspace_id === w.workspace_id).length,
         }));
         this.emitChange();
@@ -182,7 +205,11 @@ export class HerdrRuntime implements AgentRuntime {
 
     async prompt(agentId: string, text: string): Promise<void> {
         const a = this.must(agentId);
-        await this.rpc.agentPrompt(a.terminalId, text);
+        // 实测（herdr 0.8）：agent target 接受 pane_id，terminal_id 会报 agent_not_found；
+        // agent.prompt 只把文本粘贴进输入框（多行尤甚），需补一个 Enter 提交
+        await this.rpc.agentPrompt(a.snap.paneId, text);
+        await new Promise((r) => setTimeout(r, 200));
+        await this.rpc.paneSendKeys(a.snap.paneId, ["Enter"]);
     }
 
     async sendInput(agentId: string, text: string): Promise<void> {
@@ -212,6 +239,8 @@ export class HerdrRuntime implements AgentRuntime {
 
     async createWorkspace(label: string, cwd?: string): Promise<WorkspaceSnapshot> {
         const res = await this.rpc.workspaceCreate(label, cwd);
+        const createdId = res.workspace?.workspace_id;
+        if (createdId && cwd) this.cwdHints.set(createdId, cwd);
         await this.refresh();
         const created = this.workspaces.find((w) => w.id === res.workspace?.workspace_id);
         return (
@@ -240,28 +269,54 @@ export class HerdrRuntime implements AgentRuntime {
         await this.refresh();
     }
 
-    /** tab.create（继承 workspace cwd）→ agent.start(kind=claude)。TabInfo 的 pane 字段
-     *  在 0.x 未定稿，做宽松提取 + pane.list 兜底。 */
+    /** tab.create（继承 workspace cwd，pane 在返回的 root_pane 里）→ agent.start(kind=claude)。
+     *  新 pane 的 shell 需要片刻就绪，agent_pane_busy 时按 400ms 间隔重试（最长 ~8s）。 */
     async createAgent(workspaceId: string, name: string): Promise<AgentSnapshot> {
         const ws = this.workspaces.find((w) => w.id === workspaceId);
-        const tabRes = (await this.rpc.tabCreate(workspaceId, name, ws?.cwd)) as Record<
-            string,
-            unknown
-        >;
-        const tab = (tabRes.tab ?? tabRes) as Record<string, unknown>;
-        let paneId =
-            (tab.pane_id as string | undefined) ??
-            (Array.isArray(tab.panes) ? (tab.panes[0] as { pane_id?: string })?.pane_id : undefined);
-        if (!paneId) {
-            const panes = await this.rpc.paneList(workspaceId);
-            paneId = panes.panes.find((p) => p.tab_id === tab.tab_id)?.pane_id;
+        const tabRes = (await this.rpc.tabCreate(workspaceId, name, ws?.cwd)) as {
+            root_pane?: { pane_id?: string };
+        };
+        const paneId = tabRes.root_pane?.pane_id;
+        if (!paneId) throw new Error("tab.create 未返回 root_pane，无法启动 agent");
+
+        let lastErr: unknown = null;
+        for (let attempt = 0; attempt < 20; attempt++) {
+            try {
+                await this.rpc.agentStart(name, "claude", paneId);
+                lastErr = null;
+                break;
+            } catch (err) {
+                lastErr = err;
+                if (!String(err).includes("agent_pane_busy")) break;
+                await new Promise((r) => setTimeout(r, 400));
+            }
         }
-        if (!paneId) throw new Error("tab.create 未返回 pane，无法启动 agent");
-        await this.rpc.agentStart(name, "claude", paneId);
-        await this.refresh();
+        if (lastErr) {
+            await this.rpc.paneClose(paneId).catch(() => {});
+            throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+        }
+        // agent.start 后 herdr 的 agent 检测需要片刻；等 provider 就位再返回（最多 ~3s）
+        for (let attempt = 0; attempt < 6; attempt++) {
+            await this.refresh();
+            const created = [...this.agents.values()].find((a) => a.snap.paneId === paneId);
+            if (created && created.snap.provider !== "unknown") return created.snap;
+            await new Promise((r) => setTimeout(r, 500));
+        }
         const created = [...this.agents.values()].find((a) => a.snap.paneId === paneId);
         if (!created) throw new Error("agent.start 后未在 agent.list 中发现新 agent");
         return created.snap;
+    }
+
+    /** 按需同步配置（配置弹层打开时调用）：重读 Claude 会话文件里的实际模型 */
+    async syncConfig(agentId: string): Promise<void> {
+        const a = this.must(agentId);
+        const ref = this.sessions.get(agentId);
+        if (ref?.session?.source === "herdr:claude" && ref.cwd) {
+            const detected = detectClaudeModel(ref.cwd, ref.session.value);
+            if (detected && detected !== a.snap.config.model) {
+                this.setConfig(agentId, { model: detected });
+            }
+        }
     }
 
     async removeAgent(agentId: string): Promise<void> {

@@ -1,13 +1,15 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
     AgentApplyConfigParams,
     AgentApplyConfigResult,
     AgentConfig,
+    AgentIdParams,
     AgentSnapshot,
     PresetSaveParams,
     ShellProjection,
 } from "@agent-cli-contact/contracts";
-import { call, closeConfig, toast } from "../store";
+import { call, closeConfig, promptDialog, toast } from "../store";
+import { rpc } from "../ws";
 import { useI18n } from "../i18n";
 
 function sameConfig(a: AgentConfig, b: AgentConfig): boolean {
@@ -28,6 +30,21 @@ export function ConfigPopover({
 }) {
     const { t } = useI18n();
     const [config, setConfig] = useState<AgentConfig>({ ...agent.config });
+    /** 本次弹层会话内用户是否手动选过模型（选过则不再跟随投影） */
+    const userTouchedModel = useRef(false);
+
+    // 打开时让 gateway 从 provider 会话文件同步真实模型（fire-and-forget，静默失败）
+    useEffect(() => {
+        const params: AgentIdParams = { agentId: agent.id };
+        rpc("agent.syncConfig", params).catch(() => {});
+    }, [agent.id]);
+
+    // 投影里的模型变化时（sync 结果广播），未被用户改动过则跟随
+    const projectedModel = agent.config.model;
+    useEffect(() => {
+        if (userTouchedModel.current) return;
+        setConfig((c) => (c.model === projectedModel ? c : { ...c, model: projectedModel }));
+    }, [projectedModel]);
 
     const permOptions: { id: AgentConfig["permissionMode"]; name: string; note: string }[] = [
         { id: "plan", name: "Plan", note: t("cfg.permPlanNote") },
@@ -39,21 +56,26 @@ export function ConfigPopover({
         () => projection.capabilities.find((c) => c.provider === agent.provider),
         [projection.capabilities, agent.provider],
     );
-    const models =
-        cap && cap.models.length > 0
-            ? cap.models
-            : [{ id: agent.config.model, label: agent.config.model, note: "" }];
+    // 当前模型不在 provider 能力列表里（会话文件检测到的新模型）→ 置顶补一个选项
+    const capModels = cap?.models ?? [];
+    const models = capModels.some((m) => m.id === agent.config.model)
+        ? capModels
+        : [
+              { id: agent.config.model, label: agent.config.model, note: t("cfg.detectedNote") },
+              ...capModels,
+          ];
 
     const patch = (p: Partial<AgentConfig>) => setConfig((c) => ({ ...c, ...p }));
 
     const savePreset = () => {
-        const name = window.prompt(t("cfg.presetNamePrompt"));
-        if (!name || !name.trim()) return;
-        const params: PresetSaveParams = { name: name.trim(), config };
-        void call("preset.save", params).then(
-            () => toast("info", t("cfg.presetSaved", { name: name.trim() })),
-            () => undefined,
-        );
+        void promptDialog({ title: t("cfg.presetNamePrompt") }).then((name) => {
+            if (!name) return;
+            const params: PresetSaveParams = { name, config };
+            void call("preset.save", params).then(
+                () => toast("info", t("cfg.presetSaved", { name })),
+                () => undefined,
+            );
+        });
     };
 
     const apply = () => {
@@ -97,7 +119,10 @@ export function ConfigPopover({
                             <button
                                 key={m.id}
                                 className={`opt${config.model === m.id ? " sel" : ""}`}
-                                onClick={() => patch({ model: m.id })}
+                                onClick={() => {
+                                    userTouchedModel.current = true;
+                                    patch({ model: m.id });
+                                }}
                             >
                                 <span className="radio" />
                                 <span className="nm">
@@ -170,7 +195,10 @@ export function ConfigPopover({
                         <button
                             key={p.id}
                             className={`preset${sameConfig(p.config, config) ? " sel" : ""}`}
-                            onClick={() => setConfig({ ...p.config })}
+                            onClick={() => {
+                                userTouchedModel.current = true; // 预设也携带模型选择
+                                setConfig({ ...p.config });
+                            }}
                         >
                             {p.name}
                         </button>

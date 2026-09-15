@@ -189,16 +189,6 @@ button.chip:hover {
     font-size: 11px;
     color: var(--dim);
 }
-.item .cfg {
-    width: 100%;
-    padding-left: 16px;
-    font-size: 10.5px;
-    color: var(--dim2);
-    margin-top: 1px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
 .item .run-now {
     display: none;
     margin-left: 6px;
@@ -223,7 +213,8 @@ button.chip:hover {
     gap: 2px;
     margin-left: 4px;
 }
-.item:hover .ws-actions {
+.item:hover .ws-actions,
+.item .ws-actions.show {
     display: inline-flex;
 }
 .item .ws-act {
@@ -236,6 +227,27 @@ button.chip:hover {
 .item .ws-act:hover {
     color: var(--yellow-t);
     background: #ffffff10;
+}
+.item .ws-act.compose {
+    color: var(--blue-t);
+}
+.item .ws-act.compose:hover {
+    color: var(--blue-t);
+    background: #7aa2f722;
+}
+.item .ws-act:disabled {
+    color: var(--dim2);
+    cursor: default;
+    background: none;
+}
+/* 项目行下的嵌套 agent 行（Codex 式） */
+.item.agent-row {
+    padding-left: 25px;
+}
+.agent-empty {
+    padding: 2px 9px 5px 25px;
+    font-size: 11.5px;
+    color: var(--dim2);
 }
 .item .cwd {
     width: 100%;
@@ -1434,6 +1446,121 @@ button.chip:hover {
 }
 .apply:hover {
     background: var(--blue-t);
+}
+
+/* ---------- composer 图片附件 ---------- */
+.attach-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 12px 0;
+}
+.attach-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 3px 7px 3px 3px;
+    font-size: 11px;
+    color: var(--muted);
+}
+.attach-item img {
+    width: 26px;
+    height: 26px;
+    object-fit: cover;
+    border-radius: 5px;
+    display: block;
+}
+.attach-item .nm {
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.attach-item .rm {
+    color: var(--dim);
+    padding: 0 2px;
+    cursor: pointer;
+}
+.attach-item .rm:hover {
+    color: var(--yellow-t);
+}
+.composer .attach-btn {
+    font-size: 14px;
+    color: var(--dim);
+    padding: 0 4px;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+.composer .attach-btn:hover {
+    color: var(--text-mid);
+}
+.composer .send:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+/* ---------- 应用内对话框（替代 window.prompt/confirm） ---------- */
+.scrim.dlg-scrim {
+    z-index: 60;
+}
+.pop.dlg-pop {
+    width: 380px;
+    z-index: 70;
+}
+.dlg-pop .dlg-input {
+    width: 100%;
+    background: var(--panel2);
+    border: 1px solid var(--border2);
+    border-radius: 8px;
+    padding: 7px 10px;
+    font-size: 12.5px;
+}
+.dlg-pop .dlg-input:focus {
+    outline: none;
+    border-color: #7aa2f766;
+}
+.dlg-pop .dlg-body {
+    font-size: 12.5px;
+    color: var(--muted);
+    line-height: 1.5;
+}
+.dlg-pop .dlg-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 7px;
+    margin-top: 14px;
+}
+
+/* ---------- 主区 hero（Codex 式空状态） ---------- */
+.hero {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 24px;
+    text-align: center;
+}
+.hero-q {
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--text-strong);
+    max-width: 540px;
+    line-height: 1.4;
+}
+.hero-sub {
+    font-size: 13px;
+    color: var(--dim);
+}
+.hero .btn.pri {
+    margin-top: 4px;
+    font-size: 13px;
+    padding: 7px 16px;
 }
 
 /* ---------- setup 环境引导 ---------- */

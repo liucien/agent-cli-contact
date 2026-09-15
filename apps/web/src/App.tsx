@@ -3,11 +3,13 @@ import {
     closeConfig,
     closeSettings,
     openConfig,
+    resolveDialog,
     selectedAgent,
     setScreen,
     useAppState,
 } from "./store";
 import { useI18n } from "./i18n";
+import { Dialog } from "./components/Dialog";
 import { SettingsPopover } from "./components/SettingsPopover";
 import { SetupScreen } from "./components/SetupScreen";
 import { Titlebar } from "./components/Titlebar";
@@ -22,14 +24,16 @@ import { Toasts } from "./components/Toasts";
 export function App() {
     const { t } = useI18n();
     const state = useAppState();
-    const { projection, connected, screen, configAgentId, settingsOpen } = state;
+    const { projection, connected, screen, configAgentId, settingsOpen, dialog } = state;
     const agent = selectedAgent(state);
 
     // 全局快捷键
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
             if (e.key === "Escape") {
-                if (settingsOpen) {
+                if (dialog) {
+                    resolveDialog(null);
+                } else if (settingsOpen) {
                     closeSettings();
                 } else if (configAgentId) {
                     closeConfig();
@@ -48,7 +52,7 @@ export function App() {
         };
         window.addEventListener("keydown", onKey);
         return () => window.removeEventListener("keydown", onKey);
-    }, [configAgentId, screen, settingsOpen]);
+    }, [configAgentId, screen, settingsOpen, dialog]);
 
     const configAgent = configAgentId
         ? (projection?.agents.find((a) => a.id === configAgentId) ?? null)
@@ -74,11 +78,15 @@ export function App() {
                         projection={projection}
                         selectedWorkspaceId={state.selectedWorkspaceId}
                         selectedAgentId={state.selectedAgentId}
+                        composingWorkspaceId={state.composingWorkspaceId}
                     />
                     <MainPane
                         projection={projection}
                         agent={agent}
                         paneText={agent ? (state.panes[agent.id] ?? "") : ""}
+                        selectedWorkspaceId={state.selectedWorkspaceId}
+                        composingWorkspaceId={state.composingWorkspaceId}
+                        composerFocusSeq={state.composerFocusSeq}
                     />
                     <RightPanel
                         projection={projection}
@@ -95,6 +103,7 @@ export function App() {
                 <ConfigPopover projection={projection} agent={configAgent} />
             )}
             {projection && settingsOpen && <SettingsPopover projection={projection} />}
+            {dialog && <Dialog key={dialog.id} dialog={dialog} />}
             <Toasts toasts={state.toasts} />
         </div>
     );

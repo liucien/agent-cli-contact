@@ -182,6 +182,7 @@ export type RpcMethod =
     | "workspace.focus"
     | "agent.create"
     | "agent.remove"
+    | "agent.syncConfig"
     | "editor.open"
     | "settings.update"
     | "setup.install"
@@ -199,10 +200,18 @@ export type RpcMethod =
     | "preset.save"
     | "preset.delete";
 
-/** agent.prompt 与 agent.sendInput 共用 */
+/** 随 prompt 发送的图片（gateway 落盘后把路径附进 prompt，CLI 按路径读图） */
+export interface PromptImage {
+    name: string;
+    /** base64 编码的文件内容（不含 data: 前缀），单张 ≤10MB */
+    dataBase64: string;
+}
+
+/** agent.prompt 与 agent.sendInput 共用；images 仅 agent.prompt 生效 */
 export interface AgentTextParams {
     agentId: string;
     text: string;
+    images?: PromptImage[];
 }
 
 /** 在指定工作区新建 agent（local 模式直跑 claude CLI；herdr 模式 tab.create + agent.start） */

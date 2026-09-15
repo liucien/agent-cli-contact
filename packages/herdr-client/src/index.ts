@@ -16,6 +16,13 @@ import fs from "node:fs";
 
 export type HerdrAgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
 
+export interface HerdrAgentSessionInfo {
+    source: string; // 如 "herdr:claude"
+    agent: string;
+    kind: "id" | "path";
+    value: string;
+}
+
 export interface HerdrAgentInfo {
     terminal_id: string;
     pane_id: string;
@@ -25,7 +32,9 @@ export interface HerdrAgentInfo {
     agent?: string | null;
     display_agent?: string | null;
     name?: string | null;
-    title?: string | null;
+    agent_session?: HerdrAgentSessionInfo | null;
+    terminal_title?: string | null;
+    terminal_title_stripped?: string | null;
     cwd?: string | null;
     focused: boolean;
     revision: number;
@@ -227,6 +236,10 @@ export class HerdrClient {
 
     paneSendInput(paneId: string, text: string): Promise<unknown> {
         return this.request("pane.send_input", { pane_id: paneId, text });
+    }
+
+    paneSendKeys(paneId: string, keys: string[]): Promise<unknown> {
+        return this.request("pane.send_input", { pane_id: paneId, keys });
     }
 
     paneSendText(paneId: string, text: string): Promise<unknown> {

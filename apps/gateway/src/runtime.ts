@@ -35,4 +35,6 @@ export interface AgentRuntime {
     // ---- agent 生命周期 ----
     createAgent(workspaceId: string, name: string): Promise<AgentSnapshot>;
     removeAgent(agentId: string): Promise<void>;
+    /** 按需重读 provider 侧的真实配置（如 Claude 会话文件中的模型） */
+    syncConfig(agentId: string): Promise<void>;
 }

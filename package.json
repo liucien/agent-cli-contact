@@ -7,7 +7,8 @@
         "dev": "pnpm -r --parallel --filter @agent-cli-contact/gateway --filter @agent-cli-contact/web dev",
         "dev:gateway": "pnpm --filter @agent-cli-contact/gateway dev",
         "dev:web": "pnpm --filter @agent-cli-contact/web dev",
-        "build": "pnpm -r build",
+        "build": "pnpm -r --filter '!@agent-cli-contact/desktop' build",
+        "build:mac": "pnpm --filter @agent-cli-contact/desktop build",
         "typecheck": "pnpm -r typecheck",
         "format": "prettier --write ."
     },

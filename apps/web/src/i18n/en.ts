@@ -15,39 +15,44 @@ export const en = {
     "party.scheduler": "Scheduler",
 
     // ---------- sidebar ----------
-    "side.workspaces": "WORKSPACES",
-    "side.agents": "AGENTS",
+    "side.workspaces": "PROJECTS",
     "side.schedules": "SCHEDULES",
     "side.newWorkspace": "+ New",
-    "side.renameWorkspace": "Rename project",
+    "side.renameWorkspace": "Double-click to rename",
     "side.closeWorkspace": "Close project",
     "side.noWorkspaces": "Create a project to start",
-    "side.newAgent": "+ New",
     "side.closeAgent": "Close agent",
-    "side.noAgents": "No agents yet · click + New",
+    "side.noAgents": "No agents",
     "side.runNow": "Run now",
     "side.needsConfirm": "Needs review",
 
     // ---------- workspace management ----------
     "ws.promptName": "Project name:",
     "ws.pickDir": "Choose project directory",
-    "ws.promptCwd": "Directory path (optional, leave empty to skip):",
+    "ws.promptCwd": "Directory path:",
     "ws.promptRename": "New project name:",
     "ws.confirmClose": "Close project {label}? Its agent panes will be closed.",
 
     // ---------- agent management ----------
-    "agent.promptName": "Agent name",
+    "agent.compose": "New agent chat",
     "agent.confirmClose": "Close agent {name}?",
 
     // ---------- main pane ----------
-    "main.emptyAgent": "No agents in this project",
     "main.emptyShell": "Create a project and add an agent to get started",
+    "main.heroTitle": "What should we build in {name}?",
+    "main.heroSub": "Type an instruction below — it goes straight to {agent}",
     "main.termEmpty": "(waiting for terminal output…)",
     "main.meshView": "Mesh view",
     "main.openEditor": "Open in editor",
     "main.inputPlaceholder": "Send instructions to {name}…",
     "main.kbdHint": "⌘⇧M switch model · ⌘⇧P switch permissions",
     "main.send": "Send",
+
+    // ---------- image attachments ----------
+    "img.attach": "Attach images",
+    "img.tooMany": "At most {max} images per message",
+    "img.tooLarge": "Image {name} exceeds 10MB",
+    "img.defaultPrompt": "Please look at the attached image(s)",
 
     // ---------- right panel tabs ----------
     "tab.terminal": "Terminal",
@@ -83,6 +88,7 @@ export const en = {
     "btn.reject": "Reject",
     "btn.confirmApprove": "Confirm & approve",
     "btn.cancel": "Cancel",
+    "dlg.ok": "OK",
     "btn.create": "Create",
 
     // ---------- status tags ----------
@@ -135,6 +141,7 @@ export const en = {
     "cfg.context": "Context window",
     "cfg.permission": "Permission mode",
     "cfg.current": "Current",
+    "cfg.detectedNote": "Detected from session",
     "cfg.reasoningNote": "Effort and context apply immediately, starting from the next turn.",
     "cfg.permPlanNote": "Read-only · plan output only",
     "cfg.permAskNote": "Confirm each write",

@@ -32,11 +32,6 @@ export function permLabel(p: AgentConfig["permissionMode"]): string {
     return p === "plan" ? "Plan" : p === "ask" ? "Ask" : "Full access";
 }
 
-/** 侧栏配置摘要行，如 "Fable 5 · High · Full access" */
-export function configSummary(projection: ShellProjection | null, agent: AgentSnapshot): string {
-    return `${modelLabel(projection, agent)} · ${reasoningLabel(agent.config.reasoning)} · ${permLabel(agent.config.permissionMode)}`;
-}
-
 /** mesh 消息 from/to 显示名：agent id -> name；user/scheduler 特殊显示 */
 export function partyName(projection: ShellProjection | null, id: string): string {
     if (id === "user") return t("party.user");

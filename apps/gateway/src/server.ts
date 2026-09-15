@@ -33,6 +33,7 @@ import type { Scheduler } from "./scheduler.js";
 import type { ConfigService } from "./configService.js";
 import { PROVIDER_CAPABILITIES } from "./capabilities.js";
 import { openInEditor } from "./editor.js";
+import { saveImages, withImagePaths } from "./attachments.js";
 
 const PANE_POLL_MS = 1000;
 
@@ -212,8 +213,9 @@ export class GatewayServer {
         const s = this.requireServices();
         switch (req.method) {
             case "agent.prompt": {
-                const { agentId, text } = p as AgentTextParams;
-                await s.runtime.prompt(agentId, text);
+                const { agentId, text, images } = p as AgentTextParams;
+                const imagePaths = images?.length ? saveImages(images) : [];
+                await s.runtime.prompt(agentId, withImagePaths(text, imagePaths));
                 return null;
             }
             case "agent.sendInput": {
@@ -272,6 +274,10 @@ export class GatewayServer {
             case "agent.remove": {
                 await s.runtime.removeAgent((p as AgentIdParams).agentId);
                 this.broadcastShell();
+                return null;
+            }
+            case "agent.syncConfig": {
+                await s.runtime.syncConfig((p as AgentIdParams).agentId);
                 return null;
             }
 

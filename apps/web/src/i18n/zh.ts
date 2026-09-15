@@ -13,39 +13,44 @@ export const zh = {
     "party.scheduler": "定时任务",
 
     // ---------- 侧栏 ----------
-    "side.workspaces": "工作区",
-    "side.agents": "AGENTS",
+    "side.workspaces": "项目",
     "side.schedules": "定时任务",
     "side.newWorkspace": "+ 新建",
-    "side.renameWorkspace": "重命名项目",
+    "side.renameWorkspace": "双击重命名",
     "side.closeWorkspace": "关闭项目",
     "side.noWorkspaces": "新建一个项目开始",
-    "side.newAgent": "+ 新建",
     "side.closeAgent": "关闭 agent",
-    "side.noAgents": "暂无 agent · 点击 + 新建",
+    "side.noAgents": "暂无 agent",
     "side.runNow": "立即运行",
     "side.needsConfirm": "待确认",
 
     // ---------- 项目管理 ----------
     "ws.promptName": "项目名称：",
     "ws.pickDir": "选择项目目录",
-    "ws.promptCwd": "目录路径（可选，留空跳过）：",
+    "ws.promptCwd": "目录路径：",
     "ws.promptRename": "新的项目名称：",
     "ws.confirmClose": "关闭项目 {label}？其下 agent pane 将被关闭。",
 
     // ---------- agent 管理 ----------
-    "agent.promptName": "输入 agent 名称",
+    "agent.compose": "新建 agent 聊天",
     "agent.confirmClose": "关闭 agent {name}？",
 
     // ---------- 主区 ----------
-    "main.emptyAgent": "该项目暂无 agent",
     "main.emptyShell": "新建项目并添加 agent，即可开始",
+    "main.heroTitle": "你想让我们在 {name} 中构建什么？",
+    "main.heroSub": "下方输入指令，直接发给 {agent}",
     "main.termEmpty": "（等待终端输出…）",
     "main.meshView": "Mesh 视图",
     "main.openEditor": "在编辑器打开",
     "main.inputPlaceholder": "向 {name} 发送指令…",
     "main.kbdHint": "⌘⇧M 切换模型 · ⌘⇧P 切换权限",
     "main.send": "发送",
+
+    // ---------- 图片附件 ----------
+    "img.attach": "添加图片",
+    "img.tooMany": "最多附 {max} 张图片",
+    "img.tooLarge": "图片 {name} 超过 10MB",
+    "img.defaultPrompt": "请查看附图",
 
     // ---------- 右栏 tabs ----------
     "tab.terminal": "终端",
@@ -81,6 +86,7 @@ export const zh = {
     "btn.reject": "驳回",
     "btn.confirmApprove": "确认放行",
     "btn.cancel": "取消",
+    "dlg.ok": "确认",
     "btn.create": "创建",
 
     // ---------- 状态标签 ----------
@@ -133,6 +139,7 @@ export const zh = {
     "cfg.context": "上下文窗口",
     "cfg.permission": "权限模式",
     "cfg.current": "当前",
+    "cfg.detectedNote": "当前会话检测到",
     "cfg.reasoningNote": "强度与上下文即时生效，作用于下一个 turn。",
     "cfg.permPlanNote": "只读 · 仅产出计划",
     "cfg.permAskNote": "写操作逐次确认",

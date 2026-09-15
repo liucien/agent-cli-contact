@@ -21,11 +21,13 @@ pnpm dev          # 同时起 gateway (ws://localhost:7433) 与 web (http://loca
 ## 打包 macOS 应用
 
 ```bash
-pnpm --filter @agent-cli-contact/desktop build
-# 产物：
-#   apps/desktop/src-tauri/target/release/bundle/macos/agent-cli-contact.app
-#   apps/desktop/src-tauri/target/release/bundle/dmg/agent-cli-contact_0.1.0_aarch64.dmg
+pnpm build:mac    # sidecar 编译 → tauri build → DMG，产物汇总到仓库根 release/
+# release/agent-cli-contact.app
+# release/agent-cli-contact_0.1.0_aarch64.dmg
 ```
+
+> `pnpm build` 只做代码构建（各包 typecheck + web dist），不触发桌面打包。
+> Tauri 原始输出在 `apps/desktop/src-tauri/target/release/bundle/{macos,dmg}/`。
 
 Gateway 经 `bun build --compile` 编成单二进制 sidecar 捆绑进 .app（Contents/MacOS/gateway），
 应用启动时自动拉起、退出时回收；数据落 `~/.agent-cli-contact/state.json`。

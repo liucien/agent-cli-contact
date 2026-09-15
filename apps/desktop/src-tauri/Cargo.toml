@@ -1,5 +1,5 @@
 [package]
-name = "agent-workbench"
+name = "agent-cli-contact"
 version = "0.1.0"
 edition = "2021"
 description = "轻量级 AI Coding 工作台（Tauri 壳 + Gateway sidecar）"

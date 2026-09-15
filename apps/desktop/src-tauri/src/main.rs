@@ -12,6 +12,7 @@ struct GatewayChild(Mutex<Option<CommandChild>>);
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let sidecar = app.shell().sidecar("gateway")?;
             let (mut rx, child) = sidecar.spawn()?;

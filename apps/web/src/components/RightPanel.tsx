@@ -5,7 +5,7 @@ import type {
     MeshSendParams,
     MeshTimelineEntry,
     ShellProjection,
-} from "@workbench/contracts";
+} from "@agent-cli-contact/contracts";
 import { call, selectAgent, setRightTab, type RightTab } from "../store";
 import { partyName, termLineClass } from "../util";
 import { useI18n, type MsgKey } from "../i18n";

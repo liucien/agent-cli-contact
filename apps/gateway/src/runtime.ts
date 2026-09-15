@@ -1,18 +1,17 @@
 /**
- * AgentRuntime — herdr 与 mock 两种底座的统一接口。
- * Gateway 其余模块（mesh/scheduler/server）只依赖此接口，
- * 对应 PLAN 中「无 herdr 降级模式」的备胎设计。
+ * AgentRuntime — herdr 底座的接口抽象。
+ * Gateway 其余模块（mesh/scheduler/server）只依赖此接口，隔离 herdr 0.x 协议演进。
  */
-import type { AgentSnapshot, WorkspaceSnapshot, RuntimeMode } from "@workbench/contracts";
+import type { AgentSnapshot, WorkspaceSnapshot } from "@agent-cli-contact/contracts";
 
 export interface AgentRuntime {
-    readonly mode: RuntimeMode;
     /** 任意 agent/workspace 快照变化（含状态迁移） */
     onChange(cb: () => void): void;
     /** 状态迁移专用（mesh 规则 / 时间线用） */
     onStatusChange(cb: (agentId: string, from: string, to: string) => void): void;
-    readonly herdrVersion?: string;
     start(): Promise<void>;
+    /** 关闭事件订阅等长连接资源 */
+    stop(): void;
     listWorkspaces(): WorkspaceSnapshot[];
     listAgents(): AgentSnapshot[];
     getAgent(agentId: string): AgentSnapshot | undefined;
@@ -32,4 +31,8 @@ export interface AgentRuntime {
     renameWorkspace(workspaceId: string, label: string): Promise<void>;
     closeWorkspace(workspaceId: string): Promise<void>;
     focusWorkspace(workspaceId: string): Promise<void>;
+
+    // ---- agent 生命周期 ----
+    createAgent(workspaceId: string, name: string): Promise<AgentSnapshot>;
+    removeAgent(agentId: string): Promise<void>;
 }

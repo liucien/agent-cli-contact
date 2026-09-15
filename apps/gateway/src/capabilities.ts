@@ -2,7 +2,7 @@
  * per-provider capability 表（PLAN §5.4）：每个配置项走「即时注入 / 重启会话 /
  * 不支持」哪条生效路径，UI 据此置灰不支持项。
  */
-import type { ProviderCapabilities } from "@workbench/contracts";
+import type { ProviderCapabilities } from "@agent-cli-contact/contracts";
 
 export const PROVIDER_CAPABILITIES: ProviderCapabilities[] = [
     {

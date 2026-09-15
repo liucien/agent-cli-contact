@@ -3,7 +3,7 @@
  * 走「即时注入 slash 命令 / 排队到 turn 结束 / 重启会话」哪条路径。
  * MVP 实现即时路径 + working 排队；重启路径仅记账并如实上报。
  */
-import type { AgentConfig, AgentApplyConfigResult } from "@workbench/contracts";
+import type { AgentConfig, AgentApplyConfigResult } from "@agent-cli-contact/contracts";
 import type { AgentRuntime } from "./runtime.js";
 import { capabilitiesFor, modelLabel } from "./capabilities.js";
 

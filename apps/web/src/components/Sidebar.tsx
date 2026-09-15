@@ -3,8 +3,15 @@ import type {
     WorkspaceIdParams,
     WorkspaceRenameParams,
     WorkspaceSnapshot,
-} from "@workbench/contracts";
-import { call, createWorkspace, selectAgent, selectWorkspace } from "../store";
+} from "@agent-cli-contact/contracts";
+import {
+    call,
+    createAgent,
+    createWorkspace,
+    removeAgent,
+    selectAgent,
+    selectWorkspace,
+} from "../store";
 import { configSummary, statusClass } from "../util";
 import { useI18n } from "../i18n";
 
@@ -22,11 +29,29 @@ export function Sidebar({
         (a) => !selectedWorkspaceId || a.workspaceId === selectedWorkspaceId,
     );
 
-    const onCreate = () => {
-        const name = window.prompt(t("ws.promptName"));
+    const onCreate = async () => {
+        // 先选目录：Tauri 内用原生目录选择器，纯浏览器回退到 prompt
+        let cwd: string | undefined;
+        if ("__TAURI_INTERNALS__" in window) {
+            const { open } = await import("@tauri-apps/plugin-dialog");
+            const picked = await open({ directory: true, title: t("ws.pickDir") });
+            if (typeof picked !== "string") return; // 取消
+            cwd = picked;
+        } else {
+            const typed = window.prompt(t("ws.promptCwd"));
+            if (typed === null) return; // 取消
+            cwd = typed.trim() ? typed.trim() : undefined;
+        }
+        // 再输入名称，默认取目录 basename
+        const base = cwd
+            ? (cwd
+                  .replace(/[\\/]+$/, "")
+                  .split(/[\\/]/)
+                  .pop() ?? "")
+            : "";
+        const name = window.prompt(t("ws.promptName"), base);
         if (!name || !name.trim()) return;
-        const cwd = window.prompt(t("ws.promptCwd")) ?? "";
-        createWorkspace(name.trim(), cwd.trim() ? cwd.trim() : undefined);
+        createWorkspace(name.trim(), cwd);
     };
 
     const onRename = (w: WorkspaceSnapshot) => {
@@ -47,14 +72,24 @@ export function Sidebar({
         call("editor.open", params).catch(() => undefined);
     };
 
+    const onCreateAgent = () => {
+        if (!selectedWorkspaceId) return;
+        const name = window.prompt(t("agent.promptName"));
+        if (!name || !name.trim()) return;
+        createAgent(selectedWorkspaceId, name.trim());
+    };
+
     return (
         <div className="sidebar">
             <div className="side-h">
                 {t("side.workspaces")}
-                <button className="add-rule" onClick={onCreate}>
+                <button className="add-rule" onClick={() => void onCreate()}>
                     {t("side.newWorkspace")}
                 </button>
             </div>
+            {projection.workspaces.length === 0 && (
+                <div className="side-empty">{t("side.noWorkspaces")}</div>
+            )}
             {projection.workspaces.map((w) => (
                 <div
                     key={w.id}
@@ -107,14 +142,36 @@ export function Sidebar({
                 </div>
             ))}
 
-            <div className="side-h">{t("side.agents")}</div>
+            <div className="side-h">
+                {t("side.agents")}
+                {selectedWorkspaceId && (
+                    <button className="add-rule" onClick={onCreateAgent}>
+                        {t("side.newAgent")}
+                    </button>
+                )}
+            </div>
+            {agents.length === 0 && <div className="side-empty">{t("side.noAgents")}</div>}
             {agents.map((a) => (
-                <button
+                <div
                     key={a.id}
-                    className={`item${a.id === selectedAgentId ? " active" : ""}`}
+                    className={`item ws-item${a.id === selectedAgentId ? " active" : ""}`}
                     onClick={() => selectAgent(a.id)}
                 >
                     <span className={`st ${statusClass(a.status)}`} /> {a.name}
+                    <span className="ws-actions">
+                        <button
+                            className="ws-act"
+                            title={t("side.closeAgent")}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                if (!window.confirm(t("agent.confirmClose", { name: a.name })))
+                                    return;
+                                removeAgent(a.id);
+                            }}
+                        >
+                            ✕
+                        </button>
+                    </span>
                     {a.status === "blocked" ? (
                         <span className="badge">{t("side.needsConfirm")}</span>
                     ) : a.status === "done" ? (
@@ -123,7 +180,7 @@ export function Sidebar({
                         <span className="sub prov">{a.provider}</span>
                     )}
                     <span className="cfg">{configSummary(projection, a)}</span>
-                </button>
+                </div>
             ))}
 
             <div className="side-h">{t("side.schedules")}</div>

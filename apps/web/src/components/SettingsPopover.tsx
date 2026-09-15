@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { SettingsUpdateParams, ShellProjection } from "@workbench/contracts";
+import type { SettingsUpdateParams, ShellProjection } from "@agent-cli-contact/contracts";
 import { call, closeSettings } from "../store";
 import { useI18n } from "../i18n";
 

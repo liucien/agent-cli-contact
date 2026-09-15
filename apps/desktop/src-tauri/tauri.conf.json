@@ -5,7 +5,7 @@
     "identifier": "dev.workbench.agent-cli-contact",
     "build": {
         "frontendDist": "../../web/dist",
-        "beforeBuildCommand": "pnpm --filter @workbench/web build"
+        "beforeBuildCommand": "pnpm --filter @agent-cli-contact/web build"
     },
     "app": {
         "windows": [
@@ -23,7 +23,7 @@
     },
     "bundle": {
         "active": true,
-        "targets": ["app", "dmg"],
+        "targets": ["app"],
         "icon": ["icons/icon.icns", "icons/icon.png"],
         "externalBin": ["binaries/gateway"]
     }

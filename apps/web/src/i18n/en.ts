@@ -21,17 +21,27 @@ export const en = {
     "side.newWorkspace": "+ New",
     "side.renameWorkspace": "Rename project",
     "side.closeWorkspace": "Close project",
+    "side.noWorkspaces": "Create a project to start",
+    "side.newAgent": "+ New",
+    "side.closeAgent": "Close agent",
+    "side.noAgents": "No agents yet · click + New",
     "side.runNow": "Run now",
     "side.needsConfirm": "Needs review",
 
     // ---------- workspace management ----------
     "ws.promptName": "Project name:",
+    "ws.pickDir": "Choose project directory",
     "ws.promptCwd": "Directory path (optional, leave empty to skip):",
     "ws.promptRename": "New project name:",
     "ws.confirmClose": "Close project {label}? Its agent panes will be closed.",
 
+    // ---------- agent management ----------
+    "agent.promptName": "Agent name",
+    "agent.confirmClose": "Close agent {name}?",
+
     // ---------- main pane ----------
     "main.emptyAgent": "No agents in this project",
+    "main.emptyShell": "Create a project and add an agent to get started",
     "main.termEmpty": "(waiting for terminal output…)",
     "main.meshView": "Mesh view",
     "main.openEditor": "Open in editor",
@@ -154,10 +164,29 @@ export const en = {
         'The directory path is appended as the last argument, e.g. code · cursor · subl · open -a "WebStorm"',
     "set.save": "Save",
 
+    // ---------- setup guide ----------
+    "setup.title": "herdr setup",
+    "setup.subtitle":
+        "agent-cli-contact is a GUI layer for herdr and needs a herdr server running on this machine.",
+    "setup.step1": "Install herdr",
+    "setup.step2": "Start herdr server",
+    "setup.copy": "Copy",
+    "setup.copied": "Copied",
+    "setup.autoInstall": "Install automatically",
+    "setup.installing": "Installing…",
+    "setup.noBrewA": "Homebrew not detected: install it from",
+    "setup.noBrewB": "first, or see",
+    "setup.noBrewC": "for manual installation",
+    "setup.startBtn": "Start herdr server",
+    "setup.starting": "Starting…",
+    "setup.startCaption":
+        "herdr server runs persistently in the background; stop it with: herdr server stop",
+    "setup.recheck": "Recheck",
+    "setup.autoNote": "This screen advances automatically once herdr is ready",
+
     // ---------- status bar ----------
     "sb.connected": "gateway connected",
     "sb.disconnected": "gateway disconnected",
-    "sb.mock": "mock mode",
     "sb.agents": "{n} agents · {m} blocked",
     "sb.relay": "mesh relay approval: {state}",
     "sb.on": "on",

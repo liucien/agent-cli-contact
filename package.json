@@ -4,9 +4,9 @@
     "version": "0.1.0",
     "description": "轻量级 AI Coding 工作台 — herdr runtime + Gateway + React UI (MVP)",
     "scripts": {
-        "dev": "pnpm -r --parallel --filter @workbench/gateway --filter @workbench/web dev",
-        "dev:gateway": "pnpm --filter @workbench/gateway dev",
-        "dev:web": "pnpm --filter @workbench/web dev",
+        "dev": "pnpm -r --parallel --filter @agent-cli-contact/gateway --filter @agent-cli-contact/web dev",
+        "dev:gateway": "pnpm --filter @agent-cli-contact/gateway dev",
+        "dev:web": "pnpm --filter @agent-cli-contact/web dev",
         "build": "pnpm -r build",
         "typecheck": "pnpm -r typecheck",
         "format": "prettier --write ."

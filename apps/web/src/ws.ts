@@ -4,7 +4,7 @@ import {
     type RpcRequest,
     type ServerMessage,
     type ShellProjection,
-} from "@workbench/contracts";
+} from "@agent-cli-contact/contracts";
 import { t } from "./i18n";
 
 const WS_URL = `ws://localhost:${GATEWAY_PORT}`;
@@ -15,6 +15,7 @@ export interface WsHandlers {
     onPane(agentId: string, text: string): void;
     onNotify(level: "info" | "warn", text: string): void;
     onConnected(connected: boolean): void;
+    onSetupLog(line: string): void;
 }
 
 interface Pending {
@@ -89,6 +90,9 @@ function open(): void {
                 break;
             case "notify":
                 handlers?.onNotify(msg.level, msg.text);
+                break;
+            case "setup-log":
+                handlers?.onSetupLog(msg.line);
                 break;
         }
     };

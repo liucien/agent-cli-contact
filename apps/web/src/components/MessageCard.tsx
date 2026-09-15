@@ -1,6 +1,6 @@
 import { useState } from "react";
-import type { MeshMessage, MeshApproveParams } from "@workbench/contracts";
-import type { ShellProjection } from "@workbench/contracts";
+import type { MeshMessage, MeshApproveParams } from "@agent-cli-contact/contracts";
+import type { ShellProjection } from "@agent-cli-contact/contracts";
 import { call } from "../store";
 import { fmtTime, partyName } from "../util";
 import { useI18n, type MsgKey } from "../i18n";

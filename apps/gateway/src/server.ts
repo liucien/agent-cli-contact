@@ -1,14 +1,17 @@
 /**
  * WS 服务：RPC 分发 + shell 投影广播 + pane 内容订阅推送。
- * MVP 简化：投影全量广播（双订阅模型中的 subscribeShell 档）；
- * pane 内容按订阅轮询推送（subscribeThread 档的读屏基础版）。
+ * herdr 未就绪时仍然服务：投影只携带 HerdrEnv（引导页数据），
+ * setup.* / shell.get / 预设 / 设置可用，其余 RPC 报「等待 herdr 就绪」。
  */
 import { WebSocketServer, WebSocket } from "ws";
 import type {
     RpcRequest,
     ServerMessage,
     ShellProjection,
+    HerdrEnv,
     AgentTextParams,
+    AgentCreateParams,
+    AgentIdParams,
     AgentApplyConfigParams,
     ThreadSubscribeParams,
     WorkspaceCreateParams,
@@ -21,8 +24,8 @@ import type {
     MeshRuleCreateParams,
     PresetSaveParams,
     ConfigPreset,
-} from "@workbench/contracts";
-import { GATEWAY_PORT } from "@workbench/contracts";
+} from "@agent-cli-contact/contracts";
+import { GATEWAY_PORT } from "@agent-cli-contact/contracts";
 import { randomUUID } from "node:crypto";
 import type { AgentRuntime } from "./runtime.js";
 import type { MeshRelay } from "./mesh.js";
@@ -33,14 +36,25 @@ import { openInEditor } from "./editor.js";
 
 const PANE_POLL_MS = 1000;
 
-export interface ServerDeps {
+/** herdr 连接建立后才存在的运行时服务束 */
+export interface RuntimeServices {
     runtime: AgentRuntime;
     mesh: MeshRelay;
     scheduler: Scheduler;
     configService: ConfigService;
+}
+
+export interface ServerOptions {
+    getServices(): RuntimeServices | null;
+    getHerdrEnv(): HerdrEnv;
     presets: ConfigPreset[];
     settings: GatewaySettings;
     onDirty: () => void;
+    setup: {
+        install(onLine: (line: string) => void): Promise<void>;
+        start(): Promise<void>;
+        recheck(): Promise<void>;
+    };
 }
 
 export class GatewayServer {
@@ -50,12 +64,11 @@ export class GatewayServer {
     private paneRevisions = new Map<string, number>();
     private pollTimer: ReturnType<typeof setInterval>;
 
-    constructor(private deps: ServerDeps) {
+    constructor(private opts: ServerOptions) {
         this.wss = new WebSocketServer({ port: GATEWAY_PORT });
         this.wss.on("connection", (ws) => this.onConnection(ws));
         this.pollTimer = setInterval(() => void this.pollPanes(), PANE_POLL_MS);
-        deps.runtime.onChange(() => this.broadcastShell());
-        console.log(`[gateway] ws://localhost:${GATEWAY_PORT} (${deps.runtime.mode} 模式)`);
+        console.log(`[gateway] ws://localhost:${GATEWAY_PORT}`);
     }
 
     close(): void {
@@ -64,25 +77,21 @@ export class GatewayServer {
     }
 
     buildProjection(): ShellProjection {
-        const d = this.deps;
+        const s = this.opts.getServices();
         return {
-            runtime: {
-                mode: d.runtime.mode,
-                herdrVersion: d.runtime.herdrVersion,
-                connected: true,
-            },
-            workspaces: d.runtime.listWorkspaces(),
-            agents: d.runtime.listAgents(),
-            schedules: d.scheduler.snapshots(),
+            herdr: this.opts.getHerdrEnv(),
+            workspaces: s?.runtime.listWorkspaces() ?? [],
+            agents: s?.runtime.listAgents() ?? [],
+            schedules: s?.scheduler.snapshots() ?? [],
             mesh: {
-                messages: d.mesh.messages.slice(-100),
-                rules: d.mesh.rules,
-                timeline: d.mesh.timeline.slice(-200),
-                relayApproval: d.mesh.relayApproval,
+                messages: s?.mesh.messages.slice(-100) ?? [],
+                rules: s?.mesh.rules ?? [],
+                timeline: s?.mesh.timeline.slice(-200) ?? [],
+                relayApproval: s?.mesh.relayApproval ?? true,
             },
-            presets: d.presets,
+            presets: this.opts.presets,
             capabilities: PROVIDER_CAPABILITIES,
-            settings: d.settings,
+            settings: this.opts.settings,
         };
     }
 
@@ -92,6 +101,10 @@ export class GatewayServer {
 
     notify(level: "info" | "warn", text: string): void {
         this.broadcast({ type: "notify", level, text });
+    }
+
+    setupLog(line: string): void {
+        this.broadcast({ type: "setup-log", line });
     }
 
     private broadcast(msg: ServerMessage): void {
@@ -140,26 +153,77 @@ export class GatewayServer {
         }
     }
 
+    private requireServices(): RuntimeServices {
+        const s = this.opts.getServices();
+        if (!s) throw new Error("等待 herdr 就绪：请先完成引导页的安装/启动步骤");
+        return s;
+    }
+
     private async dispatch(ws: WebSocket, req: RpcRequest): Promise<unknown> {
-        const d = this.deps;
+        const o = this.opts;
         const p = req.params;
         switch (req.method) {
+            // ---- herdr 就绪前也可用 ----
             case "shell.get":
                 return this.buildProjection();
 
+            case "setup.install": {
+                await o.setup.install((line) => this.setupLog(line));
+                this.broadcastShell();
+                return null;
+            }
+            case "setup.start": {
+                await o.setup.start();
+                this.broadcastShell();
+                return null;
+            }
+            case "setup.recheck": {
+                await o.setup.recheck();
+                this.broadcastShell();
+                return null;
+            }
+
+            case "settings.update": {
+                const { editorCommand } = p as SettingsUpdateParams;
+                o.settings.editorCommand = editorCommand.trim() || "code";
+                o.onDirty();
+                this.broadcastShell();
+                return o.settings;
+            }
+            case "preset.save": {
+                const { name, config } = p as PresetSaveParams;
+                const preset: ConfigPreset = { id: randomUUID(), name, config };
+                o.presets.push(preset);
+                o.onDirty();
+                this.broadcastShell();
+                return preset;
+            }
+            case "preset.delete": {
+                const { presetId } = p as { presetId: string };
+                const idx = o.presets.findIndex((pr) => pr.id === presetId);
+                if (idx >= 0) o.presets.splice(idx, 1);
+                o.onDirty();
+                this.broadcastShell();
+                return null;
+            }
+        }
+
+        // ---- 以下全部依赖 herdr 运行时 ----
+        const s = this.requireServices();
+        switch (req.method) {
             case "agent.prompt": {
                 const { agentId, text } = p as AgentTextParams;
-                await d.runtime.prompt(agentId, text);
+                await s.runtime.prompt(agentId, text);
                 return null;
             }
             case "agent.sendInput": {
                 const { agentId, text } = p as AgentTextParams;
-                await d.runtime.sendInput(agentId, text);
+                await s.runtime.sendInput(agentId, text);
                 return null;
             }
             case "agent.applyConfig": {
                 const { agentId, config } = p as AgentApplyConfigParams;
-                const result = await d.configService.apply(agentId, config);
+                const result = await s.configService.apply(agentId, config);
                 this.broadcastShell();
                 return result;
             }
@@ -178,106 +242,94 @@ export class GatewayServer {
 
             case "workspace.create": {
                 const { label, cwd } = p as WorkspaceCreateParams;
-                const created = await d.runtime.createWorkspace(label, cwd);
+                const created = await s.runtime.createWorkspace(label, cwd);
                 this.broadcastShell();
                 return created;
             }
             case "workspace.rename": {
                 const { workspaceId, label } = p as WorkspaceRenameParams;
-                await d.runtime.renameWorkspace(workspaceId, label);
+                await s.runtime.renameWorkspace(workspaceId, label);
                 this.broadcastShell();
                 return null;
             }
             case "workspace.close": {
-                await d.runtime.closeWorkspace((p as WorkspaceIdParams).workspaceId);
+                await s.runtime.closeWorkspace((p as WorkspaceIdParams).workspaceId);
                 this.broadcastShell();
                 return null;
             }
             case "workspace.focus": {
-                await d.runtime.focusWorkspace((p as WorkspaceIdParams).workspaceId);
+                await s.runtime.focusWorkspace((p as WorkspaceIdParams).workspaceId);
+                this.broadcastShell();
+                return null;
+            }
+
+            case "agent.create": {
+                const { workspaceId, name } = p as AgentCreateParams;
+                const created = await s.runtime.createAgent(workspaceId, name);
+                this.broadcastShell();
+                return created;
+            }
+            case "agent.remove": {
+                await s.runtime.removeAgent((p as AgentIdParams).agentId);
                 this.broadcastShell();
                 return null;
             }
 
             case "editor.open": {
                 const { workspaceId } = p as WorkspaceIdParams;
-                const workspace = d.runtime.listWorkspaces().find((w) => w.id === workspaceId);
+                const workspace = s.runtime.listWorkspaces().find((w) => w.id === workspaceId);
                 if (!workspace) throw new Error(`unknown workspace: ${workspaceId}`);
                 if (!workspace.cwd) throw new Error("该项目未配置目录（cwd）");
-                await openInEditor(d.settings.editorCommand, workspace.cwd);
+                await openInEditor(o.settings.editorCommand, workspace.cwd);
                 this.notify("info", `已用编辑器打开 ${workspace.label}`);
                 return null;
-            }
-            case "settings.update": {
-                const { editorCommand } = p as SettingsUpdateParams;
-                d.settings.editorCommand = editorCommand.trim() || "code";
-                d.onDirty();
-                this.broadcastShell();
-                return d.settings;
             }
 
             case "mesh.send": {
                 const { from, to, kind, body } = p as MeshSendParams;
-                const msg = await d.mesh.send(from, to, kind, body);
+                const msg = await s.mesh.send(from, to, kind, body);
                 this.broadcastShell();
                 return msg;
             }
             case "mesh.approve": {
                 const { messageId, editedBody } = p as MeshApproveParams;
-                await d.mesh.approve(messageId, editedBody);
+                await s.mesh.approve(messageId, editedBody);
                 this.broadcastShell();
                 return null;
             }
             case "mesh.deny": {
-                d.mesh.deny((p as MeshApproveParams).messageId);
+                s.mesh.deny((p as MeshApproveParams).messageId);
                 this.broadcastShell();
                 return null;
             }
             case "mesh.setRelayApproval": {
-                d.mesh.setRelayApproval((p as { enabled: boolean }).enabled);
+                s.mesh.setRelayApproval((p as { enabled: boolean }).enabled);
                 this.broadcastShell();
                 return null;
             }
             case "mesh.rule.create": {
-                const rule = d.mesh.createRule(p as MeshRuleCreateParams);
+                const rule = s.mesh.createRule(p as MeshRuleCreateParams);
                 this.broadcastShell();
                 return rule;
             }
             case "mesh.rule.toggle": {
-                d.mesh.toggleRule((p as { ruleId: string }).ruleId);
+                s.mesh.toggleRule((p as { ruleId: string }).ruleId);
                 this.broadcastShell();
                 return null;
             }
             case "mesh.rule.delete": {
-                d.mesh.deleteRule((p as { ruleId: string }).ruleId);
+                s.mesh.deleteRule((p as { ruleId: string }).ruleId);
                 this.broadcastShell();
                 return null;
             }
 
             case "schedule.runNow": {
-                await d.scheduler.runNow((p as { scheduleId: string }).scheduleId);
+                await s.scheduler.runNow((p as { scheduleId: string }).scheduleId);
                 this.broadcastShell();
                 return null;
             }
             case "schedule.toggle": {
-                d.scheduler.toggle((p as { scheduleId: string }).scheduleId);
-                this.broadcastShell();
-                return null;
-            }
-
-            case "preset.save": {
-                const { name, config } = p as PresetSaveParams;
-                const preset: ConfigPreset = { id: randomUUID(), name, config };
-                d.presets.push(preset);
-                d.onDirty();
-                this.broadcastShell();
-                return preset;
-            }
-            case "preset.delete": {
-                const { presetId } = p as { presetId: string };
-                const idx = d.presets.findIndex((pr) => pr.id === presetId);
-                if (idx >= 0) d.presets.splice(idx, 1);
-                d.onDirty();
+                s.scheduler.toggle((p as { scheduleId: string }).scheduleId);
                 this.broadcastShell();
                 return null;
             }
@@ -288,11 +340,13 @@ export class GatewayServer {
     }
 
     private async pollPanes(): Promise<void> {
+        const s = this.opts.getServices();
+        if (!s) return;
         const wanted = new Set<string>();
         for (const [, subs] of this.paneSubs) for (const id of subs) wanted.add(id);
         for (const agentId of wanted) {
             try {
-                const { text, revision } = await this.deps.runtime.readPane(agentId);
+                const { text, revision } = await s.runtime.readPane(agentId);
                 if (this.paneRevisions.get(agentId) === revision) continue;
                 this.paneRevisions.set(agentId, revision);
                 const msg = JSON.stringify({
@@ -311,8 +365,10 @@ export class GatewayServer {
     }
 
     private async pushPane(ws: WebSocket, agentId: string): Promise<void> {
+        const s = this.opts.getServices();
+        if (!s) return;
         try {
-            const { text, revision } = await this.deps.runtime.readPane(agentId);
+            const { text, revision } = await s.runtime.readPane(agentId);
             this.paneRevisions.set(agentId, revision);
             ws.send(
                 JSON.stringify({ type: "pane", agentId, text, revision } satisfies ServerMessage),

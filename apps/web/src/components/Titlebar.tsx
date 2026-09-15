@@ -1,4 +1,4 @@
-import type { ShellProjection } from "@workbench/contracts";
+import type { ShellProjection } from "@agent-cli-contact/contracts";
 import { openSettings, type Screen } from "../store";
 import { useI18n } from "../i18n";
 
@@ -13,16 +13,11 @@ export function Titlebar({
 }) {
     const { t, locale, setLocale } = useI18n();
     const ws = projection?.workspaces.find((w) => w.id === selectedWorkspaceId);
-    const label = ws ? ws.label : "…";
     return (
         <div className="titlebar">
-            <div className="dots">
-                <div className="dot" style={{ background: "#ff5f57" }} />
-                <div className="dot" style={{ background: "#febc2e" }} />
-                <div className="dot" style={{ background: "#28c840" }} />
-            </div>
             <div className="title">
-                agent-cli-contact — {label}
+                agent-cli-contact
+                {ws ? ` — ${ws.label}` : ""}
                 {screen === "mesh" ? " · Agent Mesh" : ""}
             </div>
             <div className="right">

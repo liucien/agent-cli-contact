@@ -4,7 +4,7 @@ import type {
     AgentTextParams,
     ShellProjection,
     WorkspaceIdParams,
-} from "@workbench/contracts";
+} from "@agent-cli-contact/contracts";
 import { call, openConfig, setScreen } from "../store";
 import {
     ctxLabel,
@@ -55,7 +55,11 @@ export function MainPane({
     if (!agent) {
         return (
             <div className="main">
-                <div className="rp-placeholder">{t("main.emptyAgent")}</div>
+                <div className="rp-placeholder">
+                    {projection.workspaces.length === 0
+                        ? t("main.emptyShell")
+                        : t("main.emptyAgent")}
+                </div>
             </div>
         );
     }

@@ -1,5 +1,5 @@
 /**
- * @workbench/contracts — Gateway <-> 客户端 WebSocket 契约。
+ * @agent-cli-contact/contracts — Gateway <-> 客户端 WebSocket 契约。
  * 纯类型 + 常量，零运行时依赖（参考 T3 contracts 分包原则）。
  */
 
@@ -10,7 +10,18 @@ export const GATEWAY_PORT = 7433;
 /** herdr 的四态 + unknown（透传） */
 export type AgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
 
-export type RuntimeMode = "herdr" | "mock";
+/** herdr 环境状态：未安装 → 已安装未运行 → 启动中 → 就绪（gateway 已接管） */
+export type HerdrEnvStatus = "not-installed" | "not-running" | "starting" | "ready";
+
+export interface HerdrEnv {
+    status: HerdrEnvStatus;
+    /** herdr --version 输出的版本号，如 "0.8.0"（已安装时） */
+    version?: string;
+    /** 二进制绝对路径（已安装时） */
+    path?: string;
+    /** 本机是否有 Homebrew（决定引导页能否一键安装） */
+    brewAvailable: boolean;
+}
 
 // ---------- 投影（shell projection，侧栏/状态栏全局视图） ----------
 
@@ -135,7 +146,7 @@ export interface ProviderCapabilities {
 // ---------- 全量投影 ----------
 
 export interface ShellProjection {
-    runtime: { mode: RuntimeMode; herdrVersion?: string; connected: boolean };
+    herdr: HerdrEnv;
     workspaces: WorkspaceSnapshot[];
     agents: AgentSnapshot[];
     schedules: ScheduleSnapshot[];
@@ -169,8 +180,13 @@ export type RpcMethod =
     | "workspace.rename"
     | "workspace.close"
     | "workspace.focus"
+    | "agent.create"
+    | "agent.remove"
     | "editor.open"
     | "settings.update"
+    | "setup.install"
+    | "setup.start"
+    | "setup.recheck"
     | "mesh.send"
     | "mesh.approve"
     | "mesh.deny"
@@ -187,6 +203,16 @@ export type RpcMethod =
 export interface AgentTextParams {
     agentId: string;
     text: string;
+}
+
+/** 在指定工作区新建 agent（local 模式直跑 claude CLI；herdr 模式 tab.create + agent.start） */
+export interface AgentCreateParams {
+    workspaceId: string;
+    name: string;
+}
+
+export interface AgentIdParams {
+    agentId: string;
 }
 
 export interface AgentApplyConfigParams {
@@ -263,4 +289,6 @@ export type ServerMessage =
     | { type: "rpc-error"; id: string; error: { code: string; message: string } }
     | { type: "shell"; data: ShellProjection }
     | { type: "pane"; agentId: string; text: string; revision: number }
-    | { type: "notify"; level: "info" | "warn"; text: string };
+    | { type: "notify"; level: "info" | "warn"; text: string }
+    /** setup.install 的实时输出行（brew 安装日志） */
+    | { type: "setup-log"; line: string };

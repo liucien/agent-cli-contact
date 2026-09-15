@@ -1,10 +1,11 @@
 {
-    "name": "@workbench/desktop",
+    "name": "@agent-cli-contact/desktop",
     "version": "0.1.0",
     "private": true,
     "scripts": {
         "build:sidecar": "bun build --compile --minify ../gateway/src/index.ts --outfile src-tauri/binaries/gateway-aarch64-apple-darwin",
-        "build": "pnpm build:sidecar && tauri build",
+        "build:dmg": "./scripts/make-dmg.sh",
+        "build": "pnpm build:sidecar && tauri build && pnpm build:dmg",
         "tauri": "tauri"
     },
     "devDependencies": {

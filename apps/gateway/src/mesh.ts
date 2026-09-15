@@ -11,7 +11,7 @@ import type {
     MeshMessageKind,
     MeshRule,
     MeshTimelineEntry,
-} from "@workbench/contracts";
+} from "@agent-cli-contact/contracts";
 import type { AgentRuntime } from "./runtime.js";
 
 const RATE_LIMIT_PER_HOUR = 10;
@@ -176,14 +176,19 @@ export class MeshRelay {
 
         if (to === "idle" || to === "done") {
             const queued = this.messages.filter((m) => m.to === agentId && m.status === "queued");
-            for (const m of queued) void this.inject(m).then(() => this.onDirty());
+            for (const m of queued)
+                this.inject(m)
+                    .then(() => this.onDirty())
+                    .catch((err) => this.notify("warn", `mesh 注入失败: ${String(err)}`));
         }
 
         for (const rule of this.rules) {
             if (!rule.enabled || rule.watcherAgent !== agentId || rule.triggerState !== to)
                 continue;
             if (rule.oneShot) rule.enabled = false;
-            void this.send(rule.watcherAgent, rule.targetAgent, "prompt", rule.actionPrompt);
+            this.send(rule.watcherAgent, rule.targetAgent, "prompt", rule.actionPrompt).catch(
+                (err) => this.notify("warn", `协作规则执行失败: ${String(err)}`),
+            );
             this.notify("info", `协作规则触发：${rule.watcherAgent} ${to} → ${rule.targetAgent}`);
         }
         this.onDirty();

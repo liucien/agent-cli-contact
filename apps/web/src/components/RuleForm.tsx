@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { AgentSnapshot, MeshRuleCreateParams } from "@workbench/contracts";
+import type { AgentSnapshot, MeshRuleCreateParams } from "@agent-cli-contact/contracts";
 import { call } from "../store";
 import { useI18n } from "../i18n";
 

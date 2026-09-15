@@ -14,7 +14,7 @@ import type {
     ConfigPreset,
     ScheduleSnapshot,
     GatewaySettings,
-} from "@workbench/contracts";
+} from "@agent-cli-contact/contracts";
 
 const DATA_DIR = process.env.WORKBENCH_DATA_DIR ?? path.join(os.homedir(), ".agent-cli-contact");
 const DATA_FILE = path.join(DATA_DIR, "state.json");

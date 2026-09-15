@@ -3,13 +3,18 @@
  * 两条连接：请求响应连接 + 事件订阅长连接（herdr 不回放订阅前事件，
  * 所以订阅建立后再做一次全量 agent.list 对账）。
  */
-import { HerdrClient, defaultSocketPath, type HerdrAgentInfo } from "@workbench/herdr-client";
+import {
+    HerdrClient,
+    defaultSocketPath,
+    type HerdrAgentInfo,
+    type HerdrSubscription,
+} from "@agent-cli-contact/herdr-client";
 import type {
     AgentSnapshot,
     WorkspaceSnapshot,
     AgentConfig,
     AgentStatus,
-} from "@workbench/contracts";
+} from "@agent-cli-contact/contracts";
 import type { AgentRuntime } from "./runtime.js";
 import { PROVIDER_CAPABILITIES } from "./capabilities.js";
 
@@ -37,11 +42,9 @@ interface TrackedAgent {
 }
 
 export class HerdrRuntime implements AgentRuntime {
-    readonly mode = "herdr" as const;
-    herdrVersion?: string;
-
     private rpc: HerdrClient;
-    private events: HerdrClient;
+    private sub: HerdrSubscription | null = null;
+    private stopped = false;
     private agents = new Map<string, TrackedAgent>();
     private workspaces: WorkspaceSnapshot[] = [];
     private changeCbs: (() => void)[] = [];
@@ -52,23 +55,35 @@ export class HerdrRuntime implements AgentRuntime {
 
     constructor(socketPath = defaultSocketPath()) {
         this.rpc = new HerdrClient(socketPath);
-        this.events = new HerdrClient(socketPath);
     }
 
     async start(): Promise<void> {
-        await this.rpc.connect();
-        await this.events.connect();
         await this.rpc.ping();
         await this.refresh();
-        this.events.onEvent((ev) => this.handleEvent(ev.data));
-        await this.resubscribe();
-        // 事件长连接断开时抛给上层重启（MVP：进程级重连由 tsx watch / 用户负责）
-        this.events.onClose(() => console.error("[gateway] herdr 事件连接断开"));
+        this.resubscribe();
     }
 
-    private async resubscribe(): Promise<void> {
+    stop(): void {
+        this.stopped = true;
+        this.sub?.close();
+        this.sub = null;
+    }
+
+    /** 换订阅（pane 列表变化时）：开新长连接，断开旧的；异常断开 2s 后重试 */
+    private resubscribe(): void {
+        if (this.stopped) return;
+        const prev = this.sub;
         const paneIds = [...this.agents.values()].map((a) => a.snap.paneId);
-        await this.events.subscribeAgentEvents(paneIds);
+        const sub = this.rpc.subscribeAgentEvents(paneIds, (ev) => this.handleEvent(ev.data));
+        this.sub = sub;
+        prev?.close();
+        sub.done.catch(() => {
+            if (this.stopped || this.sub !== sub) return;
+            console.warn("[gateway] herdr 订阅连接断开，2s 后重连");
+            setTimeout(() => {
+                if (!this.stopped && this.sub === sub) this.resubscribe();
+            }, 2000);
+        });
     }
 
     private static readonly STRUCTURE_EVENTS = new Set([
@@ -82,7 +97,9 @@ export class HerdrRuntime implements AgentRuntime {
     private handleEvent(data: Record<string, unknown> & { type?: string }): void {
         // pane/workspace 结构变化：全量刷新 + 重订阅
         if (data.type && HerdrRuntime.STRUCTURE_EVENTS.has(data.type)) {
-            void this.refresh().then(() => this.resubscribe());
+            this.refresh()
+                .then(() => this.resubscribe())
+                .catch((err) => console.warn("[gateway] refresh 失败:", String(err)));
             return;
         }
         // 状态事件携带 pane_id + agent_status
@@ -102,7 +119,7 @@ export class HerdrRuntime implements AgentRuntime {
             return;
         }
         // 其它未知事件：保守全量刷新
-        void this.refresh();
+        this.refresh().catch((err) => console.warn("[gateway] refresh 失败:", String(err)));
     }
 
     private async refresh(): Promise<void> {
@@ -220,6 +237,36 @@ export class HerdrRuntime implements AgentRuntime {
 
     async focusWorkspace(workspaceId: string): Promise<void> {
         await this.rpc.workspaceFocus(workspaceId);
+        await this.refresh();
+    }
+
+    /** tab.create（继承 workspace cwd）→ agent.start(kind=claude)。TabInfo 的 pane 字段
+     *  在 0.x 未定稿，做宽松提取 + pane.list 兜底。 */
+    async createAgent(workspaceId: string, name: string): Promise<AgentSnapshot> {
+        const ws = this.workspaces.find((w) => w.id === workspaceId);
+        const tabRes = (await this.rpc.tabCreate(workspaceId, name, ws?.cwd)) as Record<
+            string,
+            unknown
+        >;
+        const tab = (tabRes.tab ?? tabRes) as Record<string, unknown>;
+        let paneId =
+            (tab.pane_id as string | undefined) ??
+            (Array.isArray(tab.panes) ? (tab.panes[0] as { pane_id?: string })?.pane_id : undefined);
+        if (!paneId) {
+            const panes = await this.rpc.paneList(workspaceId);
+            paneId = panes.panes.find((p) => p.tab_id === tab.tab_id)?.pane_id;
+        }
+        if (!paneId) throw new Error("tab.create 未返回 pane，无法启动 agent");
+        await this.rpc.agentStart(name, "claude", paneId);
+        await this.refresh();
+        const created = [...this.agents.values()].find((a) => a.snap.paneId === paneId);
+        if (!created) throw new Error("agent.start 后未在 agent.list 中发现新 agent");
+        return created.snap;
+    }
+
+    async removeAgent(agentId: string): Promise<void> {
+        const a = this.must(agentId);
+        await this.rpc.paneClose(a.snap.paneId);
         await this.refresh();
     }
 

@@ -1,12 +1,13 @@
 /**
- * @workbench/herdr-client — herdr socket API 的最小 NDJSON 客户端。
+ * @agent-cli-contact/herdr-client — herdr socket API 的最小 NDJSON 客户端。
  *
- * 协议：unix socket，newline-delimited JSON，请求 {"id","method","params"}，
- * 响应 {"id","result"} 或 {"id","error":{code,message}}；事件经 events.subscribe
- * 长连接推送（无 id 的 {"event","data"} 包）。
+ * 实测 herdr 0.8（protocol 19）连接语义：
+ *   - 普通请求：一连接一请求，server 回包后立即关闭连接（与 CLI 行为一致）
+ *   - events.subscribe：订阅确认后连接保持，事件按行推送；连接上不得再发请求
+ * 因此 request() 每次新建连接，subscribe() 使用专用长连接。
  *
- * herdr 处于 0.x，官方承诺未知字段忽略 / 未知方法报错不断连——本客户端只
- * 依赖 protocol 19 中已验证的方法与字段，升级只碰这一层（PLAN §8）。
+ * herdr 处于 0.x，官方承诺未知字段忽略——本客户端只依赖已验证的方法与字段，
+ * 升级只碰这一层（PLAN §8）。
  */
 import net from "node:net";
 import os from "node:os";
@@ -49,9 +50,11 @@ export interface HerdrEvent {
     data: Record<string, unknown> & { type?: string };
 }
 
-interface Pending {
-    resolve: (v: unknown) => void;
-    reject: (e: Error) => void;
+export interface HerdrSubscription {
+    /** 主动关闭订阅连接 */
+    close(): void;
+    /** 连接结束（主动关闭 resolve；异常断开 reject） */
+    done: Promise<void>;
 }
 
 export function defaultSocketPath(): string {
@@ -67,99 +70,101 @@ export function socketAvailable(socketPath = defaultSocketPath()): boolean {
 }
 
 export class HerdrClient {
-    private socket: net.Socket | null = null;
-    private buffer = "";
-    private nextId = 1;
-    private pending = new Map<string, Pending>();
-    private eventHandlers = new Set<(ev: HerdrEvent) => void>();
-    private closeHandlers = new Set<(err?: Error) => void>();
-
     constructor(private socketPath = defaultSocketPath()) {}
 
-    async connect(): Promise<void> {
-        if (this.socket) return;
-        await new Promise<void>((resolve, reject) => {
+    /** 一连接一请求：连接 → 写一行 → 读响应行 → server 关连接 */
+    request<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T> {
+        return new Promise<T>((resolve, reject) => {
             const sock = net.createConnection(this.socketPath);
+            let buf = "";
+            let settled = false;
+            const settle = (fn: () => void) => {
+                if (settled) return;
+                settled = true;
+                fn();
+                sock.destroy();
+            };
             sock.setEncoding("utf8");
-            sock.once("connect", () => {
-                this.socket = sock;
-                resolve();
+            sock.on("connect", () => {
+                sock.write(JSON.stringify({ id: "1", method, params: params ?? {} }) + "\n");
             });
-            sock.once("error", (err) => {
-                if (!this.socket) reject(err);
-                else this.teardown(err);
-            });
-            sock.on("data", (chunk: string) => this.onData(chunk));
-            sock.on("close", () => this.teardown());
-        });
-    }
-
-    onEvent(handler: (ev: HerdrEvent) => void): () => void {
-        this.eventHandlers.add(handler);
-        return () => this.eventHandlers.delete(handler);
-    }
-
-    onClose(handler: (err?: Error) => void): () => void {
-        this.closeHandlers.add(handler);
-        return () => this.closeHandlers.delete(handler);
-    }
-
-    close(): void {
-        this.socket?.destroy();
-        this.teardown();
-    }
-
-    private teardown(err?: Error): void {
-        if (!this.socket) return;
-        this.socket = null;
-        for (const [, p] of this.pending) p.reject(err ?? new Error("herdr connection closed"));
-        this.pending.clear();
-        for (const h of this.closeHandlers) h(err);
-    }
-
-    private onData(chunk: string): void {
-        this.buffer += chunk;
-        let idx: number;
-        while ((idx = this.buffer.indexOf("\n")) >= 0) {
-            const line = this.buffer.slice(0, idx).trim();
-            this.buffer = this.buffer.slice(idx + 1);
-            if (!line) continue;
-            let msg: Record<string, unknown>;
-            try {
-                msg = JSON.parse(line);
-            } catch {
-                continue; // 容忍无法解析的行
-            }
-            if (typeof msg.id === "string" && this.pending.has(msg.id)) {
-                const p = this.pending.get(msg.id)!;
-                this.pending.delete(msg.id);
-                const err = msg.error as { code?: string; message?: string } | undefined;
-                if (err)
-                    p.reject(new Error(`herdr ${err.code ?? "unknown"}: ${err.message ?? ""}`));
-                else p.resolve(msg.result);
-            } else if (typeof msg.event === "string") {
-                const ev = msg as unknown as HerdrEvent;
-                for (const h of this.eventHandlers) h(ev);
-            }
-        }
-    }
-
-    async request<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T> {
-        if (!this.socket) throw new Error("not connected");
-        const id = String(this.nextId++);
-        const payload = JSON.stringify({ id, method, params: params ?? {} }) + "\n";
-        return await new Promise<T>((resolve, reject) => {
-            this.pending.set(id, {
-                resolve: resolve as (v: unknown) => void,
-                reject,
-            });
-            this.socket!.write(payload, (err) => {
-                if (err) {
-                    this.pending.delete(id);
-                    reject(err);
+            sock.on("data", (chunk: string) => {
+                buf += chunk;
+                const idx = buf.indexOf("\n");
+                if (idx < 0) return;
+                const line = buf.slice(0, idx);
+                try {
+                    const msg = JSON.parse(line) as {
+                        result?: unknown;
+                        error?: { code?: string; message?: string };
+                    };
+                    if (msg.error)
+                        settle(() =>
+                            reject(
+                                new Error(
+                                    `herdr ${msg.error!.code ?? "unknown"}: ${msg.error!.message ?? ""}`,
+                                ),
+                            ),
+                        );
+                    else settle(() => resolve(msg.result as T));
+                } catch (err) {
+                    settle(() => reject(err as Error));
                 }
             });
+            sock.on("error", (err) => settle(() => reject(err)));
+            sock.on("close", () =>
+                settle(() => reject(new Error(`herdr 连接在响应前关闭 (${method})`))),
+            );
         });
+    }
+
+    /** 专用长连接订阅：确认后持续接收事件行；连接上不再写任何数据 */
+    subscribe(
+        subscriptions: Record<string, unknown>[],
+        onEvent: (ev: HerdrEvent) => void,
+    ): HerdrSubscription {
+        const sock = net.createConnection(this.socketPath);
+        let buf = "";
+        let closedByUs = false;
+        const done = new Promise<void>((resolve, reject) => {
+            sock.setEncoding("utf8");
+            sock.on("connect", () => {
+                sock.write(
+                    JSON.stringify({ id: "sub", method: "events.subscribe", params: { subscriptions } }) +
+                        "\n",
+                );
+            });
+            sock.on("data", (chunk: string) => {
+                buf += chunk;
+                let idx: number;
+                while ((idx = buf.indexOf("\n")) >= 0) {
+                    const line = buf.slice(0, idx).trim();
+                    buf = buf.slice(idx + 1);
+                    if (!line) continue;
+                    let msg: Record<string, unknown>;
+                    try {
+                        msg = JSON.parse(line);
+                    } catch {
+                        continue;
+                    }
+                    // 首行为 {"id":"sub","result":{type:"subscription_started"}}，其后均为事件
+                    if (typeof msg.event === "string") onEvent(msg as unknown as HerdrEvent);
+                    else if (msg.error)
+                        reject(new Error(`订阅失败: ${JSON.stringify(msg.error)}`));
+                }
+            });
+            sock.on("error", (err) => (closedByUs ? resolve() : reject(err)));
+            sock.on("close", () =>
+                closedByUs ? resolve() : reject(new Error("herdr 订阅连接断开")),
+            );
+        });
+        return {
+            close: () => {
+                closedByUs = true;
+                sock.destroy();
+            },
+            done,
+        };
     }
 
     // ---- 便捷方法（仅覆盖 Gateway 用到的子集） ----
@@ -228,19 +233,42 @@ export class HerdrClient {
         return this.request("pane.send_text", { pane_id: paneId, text });
     }
 
-    /** 订阅 agent 状态与 pane 生命周期事件（长连接）。 */
-    subscribeAgentEvents(paneIds: string[]): Promise<unknown> {
-        const subscriptions: Record<string, unknown>[] = [
-            { type: "pane.created" },
-            { type: "pane.closed" },
-            { type: "pane.agent_detected" },
-            { type: "workspace.created" },
-            { type: "workspace.closed" },
-            ...paneIds.map((pane_id) => ({
-                type: "pane.agent_status_changed",
-                pane_id,
-            })),
-        ];
-        return this.request("events.subscribe", { subscriptions });
+    paneClose(paneId: string): Promise<unknown> {
+        return this.request("pane.close", { pane_id: paneId });
+    }
+
+    paneList(workspaceId?: string): Promise<{ panes: { pane_id: string; tab_id: string }[] }> {
+        return this.request("pane.list", { workspace_id: workspaceId ?? null });
+    }
+
+    tabCreate(workspaceId: string, label?: string, cwd?: string | null): Promise<unknown> {
+        return this.request("tab.create", {
+            workspace_id: workspaceId,
+            label: label ?? null,
+            cwd: cwd ?? null,
+            focus: false,
+        });
+    }
+
+    agentStart(name: string, kind: string, paneId: string): Promise<unknown> {
+        return this.request("agent.start", { name, kind, pane_id: paneId });
+    }
+
+    /** 订阅 agent 状态与 pane 生命周期事件（专用长连接） */
+    subscribeAgentEvents(
+        paneIds: string[],
+        onEvent: (ev: HerdrEvent) => void,
+    ): HerdrSubscription {
+        return this.subscribe(
+            [
+                { type: "pane.created" },
+                { type: "pane.closed" },
+                { type: "pane.agent_detected" },
+                { type: "workspace.created" },
+                { type: "workspace.closed" },
+                ...paneIds.map((pane_id) => ({ type: "pane.agent_status_changed", pane_id })),
+            ],
+            onEvent,
+        );
     }
 }

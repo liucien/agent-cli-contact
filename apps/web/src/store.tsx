@@ -1,12 +1,14 @@
 import { useSyncExternalStore } from "react";
 import type {
+    AgentCreateParams,
+    AgentIdParams,
     AgentSnapshot,
     RpcMethod,
     ShellProjection,
     WorkspaceCreateParams,
     WorkspaceIdParams,
     WorkspaceSnapshot,
-} from "@workbench/contracts";
+} from "@agent-cli-contact/contracts";
 import * as wsClient from "./ws";
 
 export type RightTab = "terminal" | "computer" | "collab";
@@ -34,6 +36,8 @@ export interface AppState {
     settingsOpen: boolean;
     /** mesh 全屏视图右侧详情选中的一对 agent */
     meshPair: [string, string] | null;
+    /** setup.install 实时日志（brew 输出，上限 200 行） */
+    setupLog: string[];
 }
 
 let state: AppState = {
@@ -48,6 +52,7 @@ let state: AppState = {
     configAgentId: null,
     settingsOpen: false,
     meshPair: null,
+    setupLog: [],
 };
 
 const listeners = new Set<() => void>();
@@ -114,6 +119,22 @@ export function createWorkspace(label: string, cwd?: string): void {
         },
         () => undefined,
     );
+}
+
+export function createAgent(workspaceId: string, name: string): void {
+    const params: AgentCreateParams = { workspaceId, name };
+    call("agent.create", params).then(
+        (result) => {
+            const agent = result as AgentSnapshot | null;
+            if (agent?.id) selectAgent(agent.id);
+        },
+        () => undefined,
+    );
+}
+
+export function removeAgent(agentId: string): void {
+    const params: AgentIdParams = { agentId };
+    call("agent.remove", params).catch(() => undefined);
 }
 
 export function selectAgent(agentId: string, opts?: { toWorkbench?: boolean }): void {
@@ -197,6 +218,9 @@ wsClient.setHandlers({
     },
     onConnected(connected) {
         set({ connected });
+    },
+    onSetupLog(line) {
+        set({ setupLog: [...state.setupLog, line].slice(-200) });
     },
 });
 

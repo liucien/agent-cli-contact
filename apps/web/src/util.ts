@@ -3,7 +3,7 @@ import type {
     AgentSnapshot,
     AgentStatus,
     ShellProjection,
-} from "@workbench/contracts";
+} from "@agent-cli-contact/contracts";
 import { t } from "./i18n";
 
 export function fmtTime(ts: number | null | undefined): string {

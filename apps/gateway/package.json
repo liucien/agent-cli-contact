@@ -1,5 +1,5 @@
 {
-    "name": "@workbench/gateway",
+    "name": "@agent-cli-contact/gateway",
     "version": "0.1.0",
     "private": true,
     "type": "module",
@@ -10,8 +10,8 @@
         "build": "tsc --noEmit"
     },
     "dependencies": {
-        "@workbench/contracts": "workspace:*",
-        "@workbench/herdr-client": "workspace:*",
+        "@agent-cli-contact/contracts": "workspace:*",
+        "@agent-cli-contact/herdr-client": "workspace:*",
         "croner": "^8.1.0",
         "ws": "^8.18.0"
     },

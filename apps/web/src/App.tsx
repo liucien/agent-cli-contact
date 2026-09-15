@@ -9,6 +9,7 @@ import {
 } from "./store";
 import { useI18n } from "./i18n";
 import { SettingsPopover } from "./components/SettingsPopover";
+import { SetupScreen } from "./components/SetupScreen";
 import { Titlebar } from "./components/Titlebar";
 import { Sidebar } from "./components/Sidebar";
 import { MainPane } from "./components/MainPane";
@@ -63,6 +64,8 @@ export function App() {
 
             {projection === null ? (
                 <div className="loading">{t("app.loading")}</div>
+            ) : projection.herdr.status !== "ready" ? (
+                <SetupScreen herdr={projection.herdr} log={state.setupLog} />
             ) : screen === "mesh" ? (
                 <MeshView projection={projection} pair={state.meshPair} />
             ) : (

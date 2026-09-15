@@ -5,7 +5,7 @@
  */
 import { Cron } from "croner";
 import { randomUUID } from "node:crypto";
-import type { ScheduleSnapshot, ScheduleRunSnapshot } from "@workbench/contracts";
+import type { ScheduleSnapshot, ScheduleRunSnapshot } from "@agent-cli-contact/contracts";
 import type { MeshRelay } from "./mesh.js";
 
 export interface ScheduleDef {
@@ -47,29 +47,6 @@ export class Scheduler {
         this.defs = defs;
         this.runs = runs;
         for (const d of defs) this.arm(d);
-    }
-
-    seedDefaults(agentIds: { nightly: string; weekly: string }): void {
-        if (this.defs.length) return;
-        this.defs = [
-            {
-                id: randomUUID(),
-                name: "夜间依赖升级",
-                cronExpr: "0 2 * * *",
-                enabled: true,
-                agentId: agentIds.nightly,
-                promptTemplate: "升级项目依赖到最新兼容版本，跑全量测试，产出 diff 摘要。",
-            },
-            {
-                id: randomUUID(),
-                name: "周报生成",
-                cronExpr: "0 18 * * 5",
-                enabled: true,
-                agentId: agentIds.weekly,
-                promptTemplate: "汇总本周 git log 与已合并 PR，生成周报草稿。",
-            },
-        ];
-        for (const d of this.defs) this.arm(d);
     }
 
     snapshots(): ScheduleSnapshot[] {

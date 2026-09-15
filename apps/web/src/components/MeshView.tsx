@@ -4,7 +4,7 @@ import type {
     MeshMessage,
     MeshTimelineEntry,
     ShellProjection,
-} from "@workbench/contracts";
+} from "@agent-cli-contact/contracts";
 import { call, selectAgent, setMeshPair, setScreen } from "../store";
 import { fmtTime, partyName, statusClass } from "../util";
 import { t, useI18n, type MsgKey } from "../i18n";

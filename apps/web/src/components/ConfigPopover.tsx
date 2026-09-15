@@ -6,7 +6,7 @@ import type {
     AgentSnapshot,
     PresetSaveParams,
     ShellProjection,
-} from "@workbench/contracts";
+} from "@agent-cli-contact/contracts";
 import { call, closeConfig, toast } from "../store";
 import { useI18n } from "../i18n";
 

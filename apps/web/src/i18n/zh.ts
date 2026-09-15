@@ -19,17 +19,27 @@ export const zh = {
     "side.newWorkspace": "+ 新建",
     "side.renameWorkspace": "重命名项目",
     "side.closeWorkspace": "关闭项目",
+    "side.noWorkspaces": "新建一个项目开始",
+    "side.newAgent": "+ 新建",
+    "side.closeAgent": "关闭 agent",
+    "side.noAgents": "暂无 agent · 点击 + 新建",
     "side.runNow": "立即运行",
     "side.needsConfirm": "待确认",
 
     // ---------- 项目管理 ----------
     "ws.promptName": "项目名称：",
+    "ws.pickDir": "选择项目目录",
     "ws.promptCwd": "目录路径（可选，留空跳过）：",
     "ws.promptRename": "新的项目名称：",
     "ws.confirmClose": "关闭项目 {label}？其下 agent pane 将被关闭。",
 
+    // ---------- agent 管理 ----------
+    "agent.promptName": "输入 agent 名称",
+    "agent.confirmClose": "关闭 agent {name}？",
+
     // ---------- 主区 ----------
     "main.emptyAgent": "该项目暂无 agent",
+    "main.emptyShell": "新建项目并添加 agent，即可开始",
     "main.termEmpty": "（等待终端输出…）",
     "main.meshView": "Mesh 视图",
     "main.openEditor": "在编辑器打开",
@@ -151,10 +161,27 @@ export const zh = {
         '目录路径将作为最后一个参数传入，如：code · cursor · subl · open -a "WebStorm"',
     "set.save": "保存",
 
+    // ---------- 环境引导 ----------
+    "setup.title": "herdr 环境引导",
+    "setup.subtitle": "agent-cli-contact 是 herdr 的 GUI 层，需要本机运行 herdr server。",
+    "setup.step1": "安装 herdr",
+    "setup.step2": "启动 herdr server",
+    "setup.copy": "复制",
+    "setup.copied": "已复制",
+    "setup.autoInstall": "自动安装",
+    "setup.installing": "安装中…",
+    "setup.noBrewA": "未检测到 Homebrew：请先安装",
+    "setup.noBrewB": "，或参考",
+    "setup.noBrewC": "手动安装",
+    "setup.startBtn": "启动 herdr server",
+    "setup.starting": "启动中…",
+    "setup.startCaption": "herdr server 将在后台常驻运行；停止：herdr server stop",
+    "setup.recheck": "重新检测",
+    "setup.autoNote": "herdr 就绪后将自动进入工作台",
+
     // ---------- 状态栏 ----------
     "sb.connected": "gateway 已连接",
     "sb.disconnected": "gateway 未连接",
-    "sb.mock": "mock 模式",
     "sb.agents": "{n} agents · {m} blocked",
     "sb.relay": "mesh 中继审批：{state}",
     "sb.on": "开",

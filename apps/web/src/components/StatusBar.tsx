@@ -1,4 +1,4 @@
-import type { ShellProjection } from "@workbench/contracts";
+import type { ShellProjection } from "@agent-cli-contact/contracts";
 import { useI18n } from "../i18n";
 
 export function StatusBar({
@@ -11,7 +11,7 @@ export function StatusBar({
     const { t } = useI18n();
     const agents = projection?.agents ?? [];
     const blocked = agents.filter((a) => a.status === "blocked").length;
-    const runtime = projection?.runtime;
+    const herdr = projection?.herdr;
     return (
         <div className="statusbar">
             {connected ? (
@@ -20,11 +20,7 @@ export function StatusBar({
                 <span className="r">○ {t("sb.disconnected")}</span>
             )}
             <span>
-                {runtime
-                    ? runtime.mode === "herdr"
-                        ? `herdr v${runtime.herdrVersion ?? "?"} · unix socket`
-                        : t("sb.mock")
-                    : "…"}
+                {herdr?.status === "ready" ? `herdr v${herdr.version ?? "?"} · unix socket` : "…"}
             </span>
             <span>{t("sb.agents", { n: agents.length, m: blocked })}</span>
             <span className="ml">

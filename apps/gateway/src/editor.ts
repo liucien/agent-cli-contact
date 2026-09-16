@@ -6,6 +6,7 @@
 import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
+import { getShell } from "./env.js";
 
 export function expandHome(p: string): string {
     return p.startsWith("~") ? path.join(os.homedir(), p.slice(1)) : p;
@@ -15,7 +16,11 @@ export function openInEditor(editorCommand: string, dir: string): Promise<void> 
     const target = expandHome(dir);
     const cmd = `${editorCommand} "${target.replaceAll('"', '\\"')}"`;
     return new Promise((resolve, reject) => {
-        const child = spawn("/bin/sh", ["-lc", cmd], { stdio: ["ignore", "ignore", "pipe"] });
+        const shell = getShell();
+        const child = spawn(shell, ["-lc", cmd], {
+            env: process.env,
+            stdio: ["ignore", "ignore", "pipe"],
+        });
         let stderr = "";
         child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
         child.on("error", (err) => reject(new Error(`编辑器启动失败: ${err.message}`)));

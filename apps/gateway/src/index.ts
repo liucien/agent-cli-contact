@@ -12,12 +12,14 @@ import { ThreadLog } from "./threadLog.js";
 import { GatewayServer, type RuntimeServices } from "./server.js";
 import { loadState, saveState, type PersistedState } from "./store.js";
 import { detectHerdr, installHerdr, startHerdrServer } from "./setup.js";
+import { fixPath } from "./env.js";
 
 const DETECT_INTERVAL_MS = 2000;
 /** setup.start 后，socket 出现前的「启动中」宽限期 */
 const STARTING_GRACE_MS = 20000;
 
 async function main(): Promise<void> {
+    fixPath();
     const persisted = loadState();
 
     const presets: ConfigPreset[] = persisted?.presets ?? [
@@ -69,7 +71,7 @@ async function main(): Promise<void> {
             timeline: s ? s.mesh.timeline.slice(-500) : (persisted?.timeline ?? []),
             relayApproval: s ? s.mesh.relayApproval : (persisted?.relayApproval ?? true),
             presets,
-            schedules: sched?.defs ?? ((persisted?.schedules as ScheduleDef[]) ?? []),
+            schedules: sched?.defs ?? (persisted?.schedules as ScheduleDef[]) ?? [],
             scheduleRuns: sched?.runs ?? persisted?.scheduleRuns ?? [],
             settings,
             threads: s ? s.threadLog.persistable() : persisted?.threads,
@@ -133,18 +135,15 @@ async function main(): Promise<void> {
     }
 
     /** 环境检测 + 就绪时接管；返回投影是否需要广播 */
-    async function tick(): Promise<void> {
+    async function tick(forceRefresh = false): Promise<void> {
         const before = JSON.stringify(herdrEnv);
-        const env = await detectHerdr();
+        const env = await detectHerdr(forceRefresh);
         if (env.status === "ready" && !services) {
             try {
                 await connectHerdr();
                 herdrEnv = env;
             } catch (err) {
-                console.warn(
-                    "[gateway] herdr 连接失败:",
-                    err instanceof Error ? err.message : err,
-                );
+                console.warn("[gateway] herdr 连接失败:", err instanceof Error ? err.message : err);
                 herdrEnv = { ...env, status: "not-running" };
             }
         } else if (
@@ -181,7 +180,7 @@ async function main(): Promise<void> {
                 } finally {
                     installing = false;
                 }
-                await tick();
+                await tick(true);
             },
             async start() {
                 const env = await detectHerdr();
@@ -190,12 +189,14 @@ async function main(): Promise<void> {
                 startHerdrServer(env.path);
                 await tick();
             },
-            recheck: () => tick(),
+            recheck: () => tick(true),
         },
     });
 
     await tick();
-    console.log(`[gateway] herdr 环境: ${herdrEnv.status}${herdrEnv.version ? ` v${herdrEnv.version}` : ""}`);
+    console.log(
+        `[gateway] herdr 环境: ${herdrEnv.status}${herdrEnv.version ? ` v${herdrEnv.version}` : ""}`,
+    );
     setInterval(() => void tick(), DETECT_INTERVAL_MS);
 
     process.on("SIGINT", () => {

@@ -9,7 +9,36 @@ use tauri_plugin_shell::ShellExt;
 
 struct GatewayChild(Mutex<Option<CommandChild>>);
 
+#[cfg(target_os = "macos")]
+fn fix_macos_path() {
+    let current_path = std::env::var("PATH").unwrap_or_default();
+    let home = std::env::var("HOME").unwrap_or_default();
+    let local_bin = format!("{}/.local/bin", home);
+    let cargo_bin = format!("{}/.cargo/bin", home);
+    let candidates = [
+        "/opt/homebrew/bin",
+        "/opt/homebrew/sbin",
+        "/usr/local/bin",
+        "/usr/local/sbin",
+        local_bin.as_str(),
+        cargo_bin.as_str(),
+    ];
+    let mut to_prepend = Vec::new();
+    for c in candidates {
+        if std::path::Path::new(c).is_dir() && !current_path.split(':').any(|p| p == c) {
+            to_prepend.push(c);
+        }
+    }
+    if !to_prepend.is_empty() {
+        let new_path = format!("{}:{}", to_prepend.join(":"), current_path);
+        std::env::set_var("PATH", new_path);
+    }
+}
+
 fn main() {
+    #[cfg(target_os = "macos")]
+    fix_macos_path();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())

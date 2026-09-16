@@ -6,35 +6,132 @@
 import { spawn, execFile } from "node:child_process";
 import type { HerdrEnv } from "@agent-cli-contact/contracts";
 import { socketAvailable } from "@agent-cli-contact/herdr-client";
+import { findExecutable, getShell } from "./env";
 
 function shLookup(cmd: string): Promise<string | null> {
+    const shell = getShell();
     return new Promise((resolve) => {
-        execFile("/bin/sh", ["-lc", cmd], { timeout: 8000 }, (err, stdout) => {
+        execFile(shell, ["-lc", cmd], { timeout: 8000, env: process.env }, (err, stdout) => {
             resolve(err ? null : stdout.trim() || null);
         });
     });
 }
 
-export async function detectHerdr(): Promise<HerdrEnv> {
-    const [path, brew] = await Promise.all([
-        shLookup("command -v herdr"),
-        shLookup("command -v brew"),
-    ]);
-    if (!path) return { status: "not-installed", brewAvailable: !!brew };
-    const versionRaw = await shLookup("herdr --version"); // e.g. "herdr 0.8.0"
-    const version = versionRaw?.match(/[\d.]+/)?.[0];
-    return {
-        status: socketAvailable() ? "ready" : "not-running",
+function getVersionDirect(binPath: string): Promise<string | null> {
+    return new Promise((resolve) => {
+        execFile(binPath, ["--version"], { timeout: 4000, env: process.env }, (err, stdout) => {
+            if (err || !stdout) return resolve(null);
+            const m = stdout.match(/[\d.]+/);
+            resolve(m ? m[0] : null);
+        });
+    });
+}
+
+interface BinaryCache {
+    herdrPath: string | null;
+    version?: string;
+    brewAvailable: boolean;
+}
+
+let cachedBinary: BinaryCache | null = null;
+let probePromise: Promise<BinaryCache> | null = null;
+
+/** 清空缓存，强制下一次 detectHerdr 进行单次全量查询 */
+export function invalidateHerdrCache(): void {
+    cachedBinary = null;
+}
+
+/** 单次查询：使用 login shell 查询 command -v herdr 与 herdr status --json */
+async function probeBinary(): Promise<BinaryCache> {
+    // 1. 查找 herdr 路径：优先系统 command -v，兜底使用 findExecutable
+    let herdrPath = await shLookup("command -v herdr");
+    if (!herdrPath) {
+        herdrPath = findExecutable("herdr");
+    }
+
+    // 2. 查找 brew 路径
+    let brewPath = await shLookup("command -v brew");
+    if (!brewPath) {
+        brewPath = findExecutable("brew");
+    }
+
+    // 3. 提取版本信息：若 herdr 存在，优先尝试 herdr status --json
+    let version: string | undefined;
+    if (herdrPath) {
+        try {
+            const jsonOut = await shLookup(`${herdrPath} status --json`);
+            if (jsonOut) {
+                const parsed = JSON.parse(jsonOut);
+                if (parsed?.client?.version) {
+                    version = parsed.client.version;
+                }
+                if (parsed?.client?.binary && typeof parsed.client.binary === "string") {
+                    herdrPath = parsed.client.binary;
+                }
+            }
+        } catch {}
+
+        if (!version && herdrPath) {
+            const v = await getVersionDirect(herdrPath);
+            if (v) version = v;
+        }
+    }
+
+    const info: BinaryCache = {
+        herdrPath: herdrPath || null,
         version,
-        path,
-        brewAvailable: !!brew,
+        brewAvailable: !!brewPath,
+    };
+    cachedBinary = info;
+    return info;
+}
+
+export async function detectHerdr(forceRefresh = false): Promise<HerdrEnv> {
+    if (forceRefresh) {
+        cachedBinary = null;
+    }
+
+    // 若无缓存，启动单次探测（并发防重入）
+    if (!cachedBinary) {
+        if (!probePromise) {
+            probePromise = probeBinary().finally(() => {
+                probePromise = null;
+            });
+        }
+        await probePromise;
+    }
+
+    const info = cachedBinary!;
+    const isSocketReady = socketAvailable();
+
+    // 如果未找到 herdr 二进制，但 socket 可用（外部刚启动），自动触发一次全量探测
+    if (!info.herdrPath && isSocketReady) {
+        invalidateHerdrCache();
+        return detectHerdr(true);
+    }
+
+    // 未安装判定
+    if (!info.herdrPath && !isSocketReady) {
+        return {
+            status: "not-installed",
+            brewAvailable: info.brewAvailable,
+        };
+    }
+
+    return {
+        status: isSocketReady ? "ready" : "not-running",
+        version: info.version,
+        path: info.herdrPath ?? undefined,
+        brewAvailable: info.brewAvailable,
     };
 }
 
 /** brew install herdr，stdout/stderr 按行回调（引导页日志区） */
 export function installHerdr(onLine: (line: string) => void): Promise<void> {
     return new Promise((resolve, reject) => {
-        const child = spawn("/bin/sh", ["-lc", "brew install herdr"], {
+        const brewPath = findExecutable("brew") || "brew";
+        const child = spawn(brewPath, ["install", "herdr"], {
+            env: process.env,
             stdio: ["ignore", "pipe", "pipe"],
         });
         let buf = "";
@@ -51,6 +148,7 @@ export function installHerdr(onLine: (line: string) => void): Promise<void> {
         child.on("error", (err) => reject(new Error(`brew 启动失败: ${err.message}`)));
         child.on("exit", (code) => {
             if (buf.trim()) onLine(buf);
+            invalidateHerdrCache();
             if (code === 0) resolve();
             else reject(new Error(`brew install herdr 退出码 ${code}`));
         });
@@ -64,7 +162,8 @@ export function startHerdrServer(herdrPath: string): void {
     const env: Record<string, string> = {};
     for (const [k, v] of Object.entries(process.env)) {
         if (v === undefined) continue;
-        if (k.startsWith("CLAUDE_CODE") || k === "CLAUDECODE" || k.startsWith("ANTHROPIC_")) continue;
+        if (k.startsWith("CLAUDE_CODE") || k === "CLAUDECODE" || k.startsWith("ANTHROPIC_"))
+            continue;
         env[k] = v;
     }
     const child = spawn(herdrPath, ["server"], { detached: true, stdio: "ignore", env });

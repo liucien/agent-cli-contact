@@ -212,3 +212,116 @@ export function parseScreen(text: string, withMenu = true): Block[] {
     flushText();
     return blocks;
 }
+
+/** 剥离终端开头的 Startup Banner 字符画与底部的终端快捷键状态栏 */
+export function sanitizePaneText(rawText: string): string {
+    if (!rawText) return "";
+    let lines = rawText.split("\n");
+
+    // 1. 裁剪开头的 ASCII Banner 字符画与版本头部（如 Antigravity CLI 1.2.3、Claude Code 欢迎头）
+    let startIdx = 0;
+    for (let i = 0; i < Math.min(lines.length, 30); i++) {
+        const rawLine = lines[i];
+        if (!rawLine) continue;
+        const line = rawLine.trim();
+        if (/^─{5,}/.test(line) || /^═{5,}/.test(line)) {
+            startIdx = i + 1;
+            break;
+        }
+        if (
+            line.includes("Antigravity CLI") ||
+            line.includes("Claude Code") ||
+            line.includes("▄▀▀▄") ||
+            line.includes("▀▀▀▀") ||
+            line.startsWith("? for shortcuts")
+        ) {
+            startIdx = i + 1;
+        }
+    }
+    lines = lines.slice(startIdx);
+
+    // 2. 裁剪底部的终端快捷键状态栏
+    while (lines.length > 0) {
+        const rawLast = lines[lines.length - 1];
+        if (!rawLast) {
+            lines.pop();
+            continue;
+        }
+        const last = rawLast.trim();
+        if (
+            !last ||
+            last.includes("? for shortcuts") ||
+            last.includes("esc to cancel") ||
+            last.includes("manual mode on") ||
+            last.includes("Update available!") ||
+            /^─{5,}/.test(last) ||
+            /^═{5,}/.test(last)
+        ) {
+            lines.pop();
+            continue;
+        } else {
+            break;
+        }
+    }
+
+    return lines.join("\n").trim();
+}
+
+/**
+ * 从当前实时屏幕 blocks 中提取正在流式输出的非菜单活跃内容（思考、工具执行进度、diff 等）
+ * 自动剥离已展示的用户 Prompt 回显行
+ */
+export function extractLiveAssistantBlocks(blocks: Block[], lastUserPrompt?: string): Block[] {
+    const result: Block[] = [];
+    const corePrompt = lastUserPrompt ? lastUserPrompt.split("[附图")[0]?.trim() ?? "" : "";
+
+    for (const b of blocks) {
+        if (b.type === "menu") continue;
+        if (b.type === "diff") {
+            result.push(b);
+            continue;
+        }
+        if (b.type === "text") {
+            const filteredLines: string[] = [];
+            for (const line of b.lines) {
+                const t = line.trim();
+                if (
+                    t.startsWith("> agy") ||
+                    t.startsWith("❯ agy") ||
+                    t === ">" ||
+                    t === "❯" ||
+                    t === "> agy-1" ||
+                    t === "❯ agy-1"
+                ) {
+                    continue;
+                }
+                // 过滤 Prompt 回显与附图说明
+                if (corePrompt && t.length > 3 && corePrompt.includes(t)) continue;
+                if (
+                    t.startsWith("[附图") ||
+                    t.includes(".agent-cli-contact/attachments") ||
+                    /\.(png|jpg|jpeg|gif|webp)$/i.test(t) ||
+                    /^[a-f0-9-]{6,}\./i.test(t)
+                ) {
+                    continue;
+                }
+                filteredLines.push(line);
+            }
+            while (filteredLines.length > 0 && (filteredLines[0] ?? "").trim() === "") {
+                filteredLines.shift();
+            }
+            while (
+                filteredLines.length > 0 &&
+                (filteredLines[filteredLines.length - 1] ?? "").trim() === ""
+            ) {
+                filteredLines.pop();
+            }
+
+            if (filteredLines.length > 0) {
+                result.push({ type: "text", lines: filteredLines });
+            }
+        }
+    }
+    return result;
+}
+

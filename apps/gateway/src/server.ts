@@ -67,7 +67,7 @@ export class GatewayServer {
     private wss: WebSocketServer;
     /** ws -> 订阅的 agentId 集合 */
     private paneSubs = new Map<WebSocket, Set<string>>();
-    private paneRevisions = new Map<string, number>();
+    private paneLastTexts = new Map<string, string>();
     private pollTimer: ReturnType<typeof setInterval>;
 
     constructor(private opts: ServerOptions) {
@@ -391,8 +391,9 @@ export class GatewayServer {
         for (const agentId of wanted) {
             try {
                 const { text, revision } = await s.runtime.readPane(agentId);
-                if (this.paneRevisions.get(agentId) === revision) continue;
-                this.paneRevisions.set(agentId, revision);
+                const prev = this.paneLastTexts.get(agentId);
+                if (prev === text) continue;
+                this.paneLastTexts.set(agentId, text);
                 const msg = JSON.stringify({
                     type: "pane",
                     agentId,
@@ -413,10 +414,12 @@ export class GatewayServer {
         if (!s) return;
         try {
             const { text, revision } = await s.runtime.readPane(agentId);
-            this.paneRevisions.set(agentId, revision);
-            ws.send(
-                JSON.stringify({ type: "pane", agentId, text, revision } satisfies ServerMessage),
-            );
+            this.paneLastTexts.set(agentId, text);
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(
+                    JSON.stringify({ type: "pane", agentId, text, revision } satisfies ServerMessage),
+                );
+            }
         } catch {
             /* ignore */
         }

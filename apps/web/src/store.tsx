@@ -181,6 +181,14 @@ export function appendHistory(record: ThreadRecord): void {
     set({ history: [...state.history, record] });
 }
 
+const IMAGES_MARKER = "[附图，请读取以下图片文件]";
+
+function extractPromptCore(text: string): string {
+    const idx = text.indexOf(IMAGES_MARKER);
+    const core = idx >= 0 ? text.slice(0, idx) : text;
+    return core.trim();
+}
+
 /** 拉取选中 agent 的会话历史；静默失败（herdr 未就绪等） */
 export function fetchHistory(agentId: string): void {
     const params: AgentIdParams = { agentId };
@@ -190,12 +198,13 @@ export function fetchHistory(agentId: string): void {
             const r = result as AgentHistoryResult | null;
             const items = r?.items ?? [];
             // 保留本地尚未包含在远程返回列表里的乐观 user 消息
-            const optimisticPending = state.history.filter(
-                (h) =>
-                    h.role === "user" &&
-                    h.id?.startsWith("temp-u-") &&
-                    !items.some((it) => it.text.trim() === h.text.trim()),
-            );
+            const optimisticPending = state.history.filter((h) => {
+                if (h.role !== "user" || !h.id?.startsWith("temp-u-")) return false;
+                const hCore = extractPromptCore(h.text);
+                return !items.some(
+                    (it) => it.role === "user" && extractPromptCore(it.text) === hCore,
+                );
+            });
             set({
                 history: [...items, ...optimisticPending],
                 ...(state.connectingAgentId === agentId && items.length > 0
@@ -366,6 +375,7 @@ export function selectedAgent(s: AppState): AgentSnapshot | null {
 // ---------- WebSocket 接线 ----------
 
 let lastLiveFetch = 0;
+let lastWorkingFetch = 0;
 
 wsClient.setHandlers({
     onShell(projection) {
@@ -402,6 +412,15 @@ wsClient.setHandlers({
         } else if (selectedAgentId && prevStatus === "working") {
             const nowStatus = projection.agents.find((a) => a.id === selectedAgentId)?.status;
             if (nowStatus !== "working") fetchHistory(selectedAgentId);
+        } else if (selectedAgentId) {
+            const nowStatus = projection.agents.find((a) => a.id === selectedAgentId)?.status;
+            if (nowStatus === "working") {
+                const now = Date.now();
+                if (now - lastWorkingFetch > 1500) {
+                    lastWorkingFetch = now;
+                    fetchHistory(selectedAgentId);
+                }
+            }
         }
     },
     onPane(agentId, text) {

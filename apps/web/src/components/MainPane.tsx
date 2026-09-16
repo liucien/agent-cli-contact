@@ -31,7 +31,12 @@ import {
     statusClass,
     termLineClass,
 } from "../util";
-import { parseScreen, type Block } from "../util/parseScreen";
+import {
+    extractLiveAssistantBlocks,
+    parseScreen,
+    sanitizePaneText,
+    type Block,
+} from "../util/parseScreen";
 import { useI18n } from "../i18n";
 
 const MAX_IMAGES = 4;
@@ -407,7 +412,8 @@ function StreamView({
 }) {
     const { t } = useI18n();
     const ref = useRef<HTMLDivElement>(null);
-    const liveBlocks = useMemo(() => parseScreen(paneText), [paneText]);
+    const cleanedPane = useMemo(() => sanitizePaneText(paneText), [paneText]);
+    const liveBlocks = useMemo(() => parseScreen(cleanedPane), [cleanedPane]);
     const isWorking = agent.status === "working";
 
     // 实时帧中的交互式菜单（如选择题或权限审批选项）
@@ -416,10 +422,19 @@ function StreamView({
         [liveBlocks],
     );
 
+    const lastRecord = history[history.length - 1];
+    const isUserLast = lastRecord?.role === "user";
+
+    // 当最新一条是用户 prompt（AI 正在流式生成或暂停等待交互）时，提取终端中的实时活跃块（思考、工具执行进度、diff 等）
+    const liveAssistantBlocks = useMemo(() => {
+        if (!isUserLast) return [];
+        return extractLiveAssistantBlocks(liveBlocks, lastRecord?.text);
+    }, [isUserLast, liveBlocks, lastRecord?.text]);
+
     useEffect(() => {
         const el = ref.current;
         if (el) el.scrollTop = el.scrollHeight;
-    }, [history.length, isWorking, paneText]);
+    }, [history.length, isWorking, paneText, liveAssistantBlocks.length]);
 
     return (
         <div className="stream-view" ref={ref}>
@@ -442,6 +457,14 @@ function StreamView({
                 ) : (
                     <StreamAssistantMessage key={rec.id ?? `a-${i}`} rec={rec} />
                 ),
+            )}
+
+            {isUserLast && liveAssistantBlocks.length > 0 && (
+                <div className="stream-row assistant live-streaming">
+                    <div className="stream-bubble assistant">
+                        <Blocks blocks={liveAssistantBlocks} agentId={agentId} />
+                    </div>
+                </div>
             )}
 
             {liveMenu && (

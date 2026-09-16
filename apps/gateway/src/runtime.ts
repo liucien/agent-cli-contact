@@ -19,12 +19,16 @@ export interface AgentRuntime {
     prompt(agentId: string, text: string): Promise<void>;
     /** 对 blocked 确认等场景直接向 pane 写输入（等价 pane.send_input） */
     sendInput(agentId: string, text: string): Promise<void>;
+    /** 发送按键序列（TUI 菜单导航） */
+    sendKeys(agentId: string, keys: string[]): Promise<void>;
     /** 读取 pane 屏幕文本（strip_ansi） */
     readPane(agentId: string, lines?: number): Promise<{ text: string; revision: number }>;
     /** 配置切换的「即时生效」路径：注入 slash 命令并留审计行 */
     injectSlashCommand(agentId: string, command: string): Promise<void>;
     /** 更新 gateway 侧持有的 agent 配置摘要（重启路径 MVP 仅记账） */
     setConfig(agentId: string, patch: Partial<AgentSnapshot["config"]>): void;
+    /** 配置持久化快照 */
+    configsSnapshot(): Record<string, AgentSnapshot["config"]>;
 
     // ---- 多项目（workspace）管理 ----
     createWorkspace(label: string, cwd?: string): Promise<WorkspaceSnapshot>;

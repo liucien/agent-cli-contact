@@ -217,7 +217,7 @@ export class HerdrClient {
         return this.request("agent.prompt", { target, text });
     }
 
-    paneRead(
+    async paneRead(
         paneId: string,
         opts: {
             lines?: number;
@@ -225,13 +225,18 @@ export class HerdrClient {
             stripAnsi?: boolean;
         } = {},
     ): Promise<HerdrPaneReadResult> {
-        return this.request("pane.read", {
-            pane_id: paneId,
-            source: opts.source ?? "visible",
-            lines: opts.lines,
-            strip_ansi: opts.stripAnsi ?? true,
-            format: "text",
-        });
+        // 实测：pane.read 的响应体嵌套在 result.read 下
+        const res = await this.request<{ read?: HerdrPaneReadResult } & HerdrPaneReadResult>(
+            "pane.read",
+            {
+                pane_id: paneId,
+                source: opts.source ?? "visible",
+                lines: opts.lines,
+                strip_ansi: opts.stripAnsi ?? true,
+                format: "text",
+            },
+        );
+        return res.read ?? res;
     }
 
     paneSendInput(paneId: string, text: string): Promise<unknown> {

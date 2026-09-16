@@ -1,20 +1,24 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
+    AgentSendKeysParams,
     AgentSnapshot,
     AgentTextParams,
     PromptImage,
     ShellProjection,
+    ThreadRecord,
     WorkspaceIdParams,
 } from "@agent-cli-contact/contracts";
 import { call, composeAgent, openConfig, setScreen, toast } from "../store";
 import {
     ctxLabel,
+    fmtTime,
     modelLabel,
     permLabel,
     reasoningLabel,
     statusClass,
     termLineClass,
 } from "../util";
+import { parseScreen, type Block } from "../util/parseScreen";
 import { useI18n } from "../i18n";
 
 const MAX_IMAGES = 4;
@@ -41,25 +45,184 @@ function readAsBase64(file: File): Promise<string> {
     });
 }
 
-function Terminal({ text }: { text: string }) {
+/** diff 行拆出行号（置灰）与内容 */
+function DiffLine({ kind, text }: { kind: "add" | "del" | "ctx"; text: string }) {
+    const m = text.match(/^(\s*\d+\s*)(.*)$/);
+    return (
+        <div className={`d-${kind}`}>
+            {m ? (
+                <>
+                    <span className="ln">{m[1]}</span>
+                    {m[2] === "" ? " " : m[2]}
+                </>
+            ) : text === "" ? (
+                " "
+            ) : (
+                text
+            )}
+        </div>
+    );
+}
+
+function MenuCard({
+    block,
+    agentId,
+}: {
+    block: Extract<Block, { type: "menu" }>;
+    agentId: string;
+}) {
+    // 以菜单内容 hash 记录"已作答"，同一菜单点击后全部禁用；菜单消失/更换时自动复位
+    const hash = useMemo(
+        () => JSON.stringify([block.question, block.options.map((o) => `${o.num}.${o.label}`)]),
+        [block],
+    );
+    const [answeredHash, setAnsweredHash] = useState<string | null>(null);
+    const disabled = answeredHash === hash;
+
+    // 通用协议：方向键把 ❯ 移到目标项再回车（数字直选只有部分菜单支持）
+    const pick = (target: number) => {
+        setAnsweredHash(hash);
+        const current = block.options.find((o) => o.selected)?.num ?? 1;
+        const delta = target - current;
+        const keys = [
+            ...(delta > 0 ? Array<string>(delta).fill("Down") : Array<string>(-delta).fill("Up")),
+            "Enter",
+        ];
+        const params: AgentSendKeysParams = { agentId, keys };
+        void call("agent.sendKeys", params);
+    };
+
+    return (
+        <div className="menu-card">
+            {block.question && <div className="q">{block.question}</div>}
+            {block.options.map((o) => (
+                <button
+                    key={o.num}
+                    className={`opt${o.selected ? " sel" : ""}`}
+                    disabled={disabled}
+                    onClick={() => pick(o.num)}
+                >
+                    <span className="nb">{o.num}</span>
+                    <span className="lb">{o.label}</span>
+                </button>
+            ))}
+            {block.hint && <div className="hint">{block.hint}</div>}
+        </div>
+    );
+}
+
+/** 结构化 block 列表渲染（历史帧解析时关闭菜单，故 MenuCard 只会出现在实时帧） */
+function Blocks({ blocks, agentId }: { blocks: Block[]; agentId: string }) {
+    return (
+        <>
+            {blocks.map((b, bi) =>
+                b.type === "text" ? (
+                    <div key={bi}>
+                        {b.lines.map((line, i) => (
+                            <div key={i} className={termLineClass(line)}>
+                                {line === "" ? " " : line}
+                            </div>
+                        ))}
+                    </div>
+                ) : b.type === "diff" ? (
+                    <div key={bi} className="diff-card">
+                        {b.lines.map((l, i) => (
+                            <DiffLine key={i} kind={l.kind} text={l.text} />
+                        ))}
+                    </div>
+                ) : (
+                    <MenuCard key={bi} block={b} agentId={agentId} />
+                ),
+            )}
+        </>
+    );
+}
+
+/** gateway 注入 prompt 时给附图段落加的标记 */
+const IMAGES_MARKER = "[附图，请读取以下图片文件]";
+
+/** 用户 prompt 记录行：❯ 前缀 + 主文本；附图路径渲染成 📎 chips */
+function UserRecordRow({ text }: { text: string }) {
+    const idx = text.indexOf(IMAGES_MARKER);
+    const main = idx >= 0 ? text.slice(0, idx).trimEnd() : text;
+    const paths =
+        idx >= 0
+            ? text
+                  .slice(idx + IMAGES_MARKER.length)
+                  .split("\n")
+                  .map((s) => s.trim())
+                  .filter((s) => s !== "")
+            : [];
+    return (
+        <div className="prompt-row">
+            <span className="pfx">❯ </span>
+            {main}
+            {paths.length > 0 && (
+                <span className="pimgs">
+                    {paths.map((p, i) => (
+                        <span key={i} className="pimg" title={p}>
+                            📎 {p.split(/[\\/]/).pop() ?? p}
+                        </span>
+                    ))}
+                </span>
+            )}
+        </div>
+    );
+}
+
+/** 助手历史帧：内缩容器 + 时间戳头；帧内菜单渲染为纯文本（不可交互） */
+function AssistantRecord({ rec }: { rec: ThreadRecord }) {
+    const blocks = useMemo(() => parseScreen(rec.text, false), [rec.text]);
+    return (
+        <div className="hist-frame">
+            <div className="hist-hd">{fmtTime(rec.at)}</div>
+            <Blocks blocks={blocks} agentId="" />
+        </div>
+    );
+}
+
+/** 会话线程视图：历史记录（gateway 自录）+ 分隔线 + 实时屏幕帧 */
+function ThreadView({
+    history,
+    paneText,
+    agentId,
+}: {
+    history: ThreadRecord[];
+    paneText: string;
+    agentId: string;
+}) {
     const { t } = useI18n();
     const ref = useRef<HTMLDivElement>(null);
+    const liveBlocks = useMemo(() => parseScreen(paneText), [paneText]);
+
+    // 实时帧与最后一条 assistant 记录完全相同（turn 刚结束）→ 跳过该条历史避免重复
+    const items = useMemo(() => {
+        const last = history[history.length - 1];
+        if (last && last.role === "assistant" && last.text === paneText) {
+            return history.slice(0, -1);
+        }
+        return history;
+    }, [history, paneText]);
+
     useEffect(() => {
         const el = ref.current;
         if (el) el.scrollTop = el.scrollHeight;
-    }, [text]);
+    }, [paneText, items.length]);
 
-    const lines = text.length > 0 ? text.split("\n") : [];
     return (
         <div className="term mono" ref={ref}>
-            {lines.length === 0 ? (
+            {items.map((rec, i) =>
+                rec.role === "user" ? (
+                    <UserRecordRow key={i} text={rec.text} />
+                ) : (
+                    <AssistantRecord key={i} rec={rec} />
+                ),
+            )}
+            {items.length > 0 && <div className="thread-divider">{t("main.liveDivider")}</div>}
+            {liveBlocks.length === 0 ? (
                 <div className="term-empty">{t("main.termEmpty")}</div>
             ) : (
-                lines.map((line, i) => (
-                    <div key={i} className={termLineClass(line)}>
-                        {line === "" ? " " : line}
-                    </div>
-                ))
+                <Blocks blocks={liveBlocks} agentId={agentId} />
             )}
         </div>
     );
@@ -69,6 +232,7 @@ export function MainPane({
     projection,
     agent,
     paneText,
+    history,
     selectedWorkspaceId,
     composingWorkspaceId,
     composerFocusSeq,
@@ -76,6 +240,7 @@ export function MainPane({
     projection: ShellProjection;
     agent: AgentSnapshot | null;
     paneText: string;
+    history: ThreadRecord[];
     selectedWorkspaceId: string | null;
     composingWorkspaceId: string | null;
     composerFocusSeq: number;
@@ -84,13 +249,21 @@ export function MainPane({
     const [input, setInput] = useState("");
     const [images, setImages] = useState<AttachedImage[]>([]);
     const [sending, setSending] = useState(false);
-    const inputRef = useRef<HTMLInputElement>(null);
+    const inputRef = useRef<HTMLTextAreaElement>(null);
     const fileRef = useRef<HTMLInputElement>(null);
 
     // compose 成功后自动聚焦 composer
     useEffect(() => {
         inputRef.current?.focus();
     }, [composerFocusSeq]);
+
+    // textarea 随内容自动增高（上限 ~6 行 / 140px，超出滚动）
+    useEffect(() => {
+        const el = inputRef.current;
+        if (!el) return;
+        el.style.height = "auto";
+        el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
+    }, [input]);
 
     // 卸载时回收缩略图 object URL
     const imagesRef = useRef<AttachedImage[]>([]);
@@ -209,8 +382,9 @@ export function MainPane({
         call("editor.open", params).catch(() => undefined);
     };
 
-    // pane 内容还很"空"（刚创建/无输出）→ Codex 式 hero，有真实输出后自动切回终端
+    // pane 内容还很"空"且没有任何历史 → Codex 式 hero；有输出/历史后切回线程视图
     const trivialPane = paneText === "" || (agent.turn === 0 && paneText.split("\n").length < 3);
+    const showHero = history.length === 0 && trivialPane;
 
     return (
         <div className="main">
@@ -232,7 +406,7 @@ export function MainPane({
                 </div>
             </div>
 
-            {trivialPane ? (
+            {showHero ? (
                 <div className="hero">
                     <div className="hero-q">
                         {t("main.heroTitle", { name: workspace?.label ?? agent.name })}
@@ -240,7 +414,7 @@ export function MainPane({
                     <div className="hero-sub">{t("main.heroSub", { agent: agent.name })}</div>
                 </div>
             ) : (
-                <Terminal text={paneText} />
+                <ThreadView history={history} paneText={paneText} agentId={agent.id} />
             )}
 
             <div className="composer-wrap">
@@ -292,8 +466,9 @@ export function MainPane({
                     >
                         📎
                     </button>
-                    <input
+                    <textarea
                         ref={inputRef}
+                        rows={1}
                         placeholder={t("main.inputPlaceholder", { name: agent.name })}
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
@@ -307,7 +482,10 @@ export function MainPane({
                             }
                         }}
                         onKeyDown={(e) => {
-                            if (e.key === "Enter" && !e.shiftKey) send();
+                            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                                e.preventDefault();
+                                send();
+                            }
                         }}
                     />
                     <span className="hint">{t("main.kbdHint")}</span>

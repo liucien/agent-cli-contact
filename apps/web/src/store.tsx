@@ -1,10 +1,12 @@
 import { useSyncExternalStore } from "react";
 import type {
     AgentCreateParams,
+    AgentHistoryResult,
     AgentIdParams,
     AgentSnapshot,
     RpcMethod,
     ShellProjection,
+    ThreadRecord,
     WorkspaceCreateParams,
     WorkspaceIdParams,
     WorkspaceSnapshot,
@@ -49,6 +51,8 @@ export interface AppState {
     composerFocusSeq: number;
     /** 当前打开的应用内对话框（一次一个） */
     dialog: DialogState | null;
+    /** 当前选中 agent 的会话历史（gateway 自录，turn 结束时增量刷新） */
+    history: ThreadRecord[];
 }
 
 let state: AppState = {
@@ -67,6 +71,7 @@ let state: AppState = {
     composingWorkspaceId: null,
     composerFocusSeq: 0,
     dialog: null,
+    history: [],
 };
 
 const listeners = new Set<() => void>();
@@ -154,6 +159,27 @@ export function call(method: RpcMethod, params?: unknown): Promise<unknown> {
     });
 }
 
+// ---------- 会话历史 ----------
+
+/** 拉取选中 agent 的会话历史；静默失败（herdr 未就绪等） */
+function fetchHistory(agentId: string): void {
+    const params: AgentIdParams = { agentId };
+    wsClient.rpc("agent.history", params).then(
+        (result) => {
+            if (state.selectedAgentId !== agentId) return; // 拉取期间已切走
+            const r = result as AgentHistoryResult | null;
+            set({ history: r?.items ?? [] });
+        },
+        () => undefined,
+    );
+}
+
+/** 选中 agent 变化后调用：清空旧历史并重新拉取 */
+function onAgentSelectionChanged(agentId: string | null): void {
+    set({ history: [] });
+    if (agentId) fetchHistory(agentId);
+}
+
 // ---------- actions ----------
 
 export function selectWorkspace(workspaceId: string): void {
@@ -164,8 +190,10 @@ export function selectWorkspace(workspaceId: string): void {
     const agents = state.projection?.agents.filter((a) => a.workspaceId === workspaceId) ?? [];
     const current = agents.find((a) => a.id === state.selectedAgentId);
     const next = current ?? agents[0] ?? null;
+    const changed = (next ? next.id : null) !== state.selectedAgentId;
     set({ selectedWorkspaceId: workspaceId, selectedAgentId: next ? next.id : null });
     wsClient.switchPane(next ? next.id : null);
+    if (changed) onAgentSelectionChanged(next ? next.id : null);
 }
 
 export function createWorkspace(label: string, cwd?: string): void {
@@ -204,6 +232,7 @@ export function removeAgent(agentId: string): void {
 }
 
 export function selectAgent(agentId: string, opts?: { toWorkbench?: boolean }): void {
+    const changed = agentId !== state.selectedAgentId;
     const agent = state.projection?.agents.find((a) => a.id === agentId);
     set({
         selectedAgentId: agentId,
@@ -211,6 +240,7 @@ export function selectAgent(agentId: string, opts?: { toWorkbench?: boolean }): 
         ...(opts?.toWorkbench ? { screen: "workbench" as Screen } : {}),
     });
     wsClient.switchPane(agentId);
+    if (changed) onAgentSelectionChanged(agentId);
 }
 
 export function setRightTab(tab: RightTab): void {
@@ -253,6 +283,10 @@ export function selectedAgent(s: AppState): AgentSnapshot | null {
 wsClient.setHandlers({
     onShell(projection) {
         let { selectedWorkspaceId, selectedAgentId } = state;
+        const prevSelectedId = state.selectedAgentId;
+        const prevStatus = prevSelectedId
+            ? state.projection?.agents.find((a) => a.id === prevSelectedId)?.status
+            : undefined;
         // 选中的工作区消失（被别处关闭）→ 回退到 focused / 第一个
         if (
             !selectedWorkspaceId ||
@@ -275,8 +309,16 @@ wsClient.setHandlers({
             wsClient.switchPane(selectedAgentId);
         }
         set({ projection, selectedWorkspaceId, selectedAgentId });
+        // 历史刷新：选中变化 → 重拉；同一 agent 从 working 退出 → turn 刚结束，有新记录
+        if (selectedAgentId !== prevSelectedId) {
+            onAgentSelectionChanged(selectedAgentId);
+        } else if (selectedAgentId && prevStatus === "working") {
+            const nowStatus = projection.agents.find((a) => a.id === selectedAgentId)?.status;
+            if (nowStatus !== "working") fetchHistory(selectedAgentId);
+        }
     },
     onPane(agentId, text) {
+        if (typeof text !== "string") return; // 防御：异常载荷不覆盖已有 pane 文本
         set({ panes: { ...state.panes, [agentId]: text } });
     },
     onNotify(level, text) {

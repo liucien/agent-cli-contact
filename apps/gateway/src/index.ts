@@ -8,6 +8,7 @@ import { HerdrRuntime } from "./herdrRuntime.js";
 import { MeshRelay } from "./mesh.js";
 import { Scheduler, type ScheduleDef } from "./scheduler.js";
 import { ConfigService } from "./configService.js";
+import { ThreadLog } from "./threadLog.js";
 import { GatewayServer, type RuntimeServices } from "./server.js";
 import { loadState, saveState, type PersistedState } from "./store.js";
 import { detectHerdr, installHerdr, startHerdrServer } from "./setup.js";
@@ -71,6 +72,8 @@ async function main(): Promise<void> {
             schedules: sched?.defs ?? ((persisted?.schedules as ScheduleDef[]) ?? []),
             scheduleRuns: sched?.runs ?? persisted?.scheduleRuns ?? [],
             settings,
+            threads: s ? s.threadLog.persistable() : persisted?.threads,
+            agentConfigs: s ? s.runtime.configsSnapshot() : persisted?.agentConfigs,
         };
         saveState(state);
     };
@@ -82,14 +85,19 @@ async function main(): Promise<void> {
     const notify = (level: "info" | "warn", text: string) => server?.notify(level, text);
 
     async function connectHerdr(): Promise<void> {
-        const runtime = new HerdrRuntime();
+        const runtime = new HerdrRuntime(persisted?.agentConfigs);
         try {
             await runtime.start();
         } catch (err) {
             runtime.stop();
             throw err;
         }
-        const mesh = new MeshRelay(runtime, { onDirty, notify });
+        const threadLog = new ThreadLog(runtime, persisted?.threads, onDirty);
+        const mesh = new MeshRelay(runtime, {
+            onDirty,
+            notify,
+            onInject: (to, text) => threadLog.user(to, text),
+        });
         const scheduler = new Scheduler(mesh, onDirty);
         const configService = new ConfigService(runtime, notify);
         if (persisted) {
@@ -104,8 +112,23 @@ async function main(): Promise<void> {
         } else {
             scheduler.load([], []);
         }
-        services = { runtime, mesh, scheduler, configService };
-        runtime.onChange(() => server?.broadcastShell());
+        services = { runtime, mesh, scheduler, configService, threadLog };
+        runtime.onChange(() => onDirty()); // 状态/配置变化：持久化（去抖）+ 广播
+
+        // Full access 语义：blocked（权限确认菜单）时自动批准当前默认项
+        runtime.onStatusChange((agentId, _from, to) => {
+            if (to !== "blocked") return;
+            const agent = runtime.getAgent(agentId);
+            if (agent?.config.permissionMode !== "full") return;
+            setTimeout(() => {
+                const a = runtime.getAgent(agentId);
+                if (a?.status !== "blocked") return;
+                runtime.sendKeys(agentId, ["Enter"]).then(
+                    () => notify("info", `${a.name}: Full access 已自动批准`),
+                    () => {},
+                );
+            }, 800);
+        });
         console.log("[gateway] 已连接 herdr socket，运行时服务就绪");
     }
 

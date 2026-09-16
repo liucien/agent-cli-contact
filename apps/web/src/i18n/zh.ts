@@ -39,11 +39,12 @@ export const zh = {
     "main.emptyShell": "新建项目并添加 agent，即可开始",
     "main.heroTitle": "你想让我们在 {name} 中构建什么？",
     "main.heroSub": "下方输入指令，直接发给 {agent}",
+    "main.liveDivider": "— 当前 —",
     "main.termEmpty": "（等待终端输出…）",
     "main.meshView": "Mesh 视图",
     "main.openEditor": "在编辑器打开",
     "main.inputPlaceholder": "向 {name} 发送指令…",
-    "main.kbdHint": "⌘⇧M 切换模型 · ⌘⇧P 切换权限",
+    "main.kbdHint": "⏎ 发送 · ⇧⏎ 换行 · ⌘⇧M 切换模型 · ⌘⇧P 切换权限",
     "main.send": "发送",
 
     // ---------- 图片附件 ----------

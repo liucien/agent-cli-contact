@@ -41,11 +41,12 @@ export const en = {
     "main.emptyShell": "Create a project and add an agent to get started",
     "main.heroTitle": "What should we build in {name}?",
     "main.heroSub": "Type an instruction below — it goes straight to {agent}",
+    "main.liveDivider": "— live —",
     "main.termEmpty": "(waiting for terminal output…)",
     "main.meshView": "Mesh view",
     "main.openEditor": "Open in editor",
     "main.inputPlaceholder": "Send instructions to {name}…",
-    "main.kbdHint": "⌘⇧M switch model · ⌘⇧P switch permissions",
+    "main.kbdHint": "⏎ send · ⇧⏎ newline · ⌘⇧M switch model · ⌘⇧P switch permissions",
     "main.send": "Send",
 
     // ---------- image attachments ----------

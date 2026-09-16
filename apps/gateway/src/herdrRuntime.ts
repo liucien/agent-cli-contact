@@ -63,8 +63,14 @@ export class HerdrRuntime implements AgentRuntime {
     /** herdr workspace.list 不回传 cwd：记住创建时传入的值作兜底 */
     private cwdHints = new Map<string, string>();
 
-    constructor(socketPath = defaultSocketPath()) {
+    constructor(persistedConfigs?: Record<string, AgentConfig>, socketPath = defaultSocketPath()) {
         this.rpc = new HerdrClient(socketPath);
+        if (persistedConfigs) this.configs = new Map(Object.entries(persistedConfigs));
+    }
+
+    /** 配置持久化快照（gateway 重启后恢复，避免 Full access 等设置回落默认） */
+    configsSnapshot(): Record<string, AgentConfig> {
+        return Object.fromEntries(this.configs);
     }
 
     async start(): Promise<void> {
@@ -139,6 +145,8 @@ export class HerdrRuntime implements AgentRuntime {
         ]);
         const list: HerdrAgentInfo[] = agentsRes.agents ?? [];
         const next = new Map<string, TrackedAgent>();
+        // refresh 也可能承载状态迁移（结构事件路径），需要补发 statusCbs
+        const transitions: { id: string; from: string; to: string }[] = [];
         for (const info of list) {
             const id = info.pane_id;
             const providerRaw = (info.agent ?? info.display_agent ?? "unknown").toLowerCase();
@@ -169,8 +177,15 @@ export class HerdrRuntime implements AgentRuntime {
                     config,
                 },
             });
+            if (prev && prev.snap.status !== info.agent_status) {
+                transitions.push({ id, from: prev.snap.status, to: info.agent_status });
+            }
         }
         this.agents = next;
+        for (const tr of transitions) {
+            if (tr.to === "working") this.turns.set(tr.id, (this.turns.get(tr.id) ?? 0) + 1);
+            for (const cb of this.statusCbs) cb(tr.id, tr.from, tr.to);
+        }
         const wsList = (wsRes.workspaces ?? []) as {
             workspace_id: string;
             label?: string | null;
@@ -217,9 +232,15 @@ export class HerdrRuntime implements AgentRuntime {
         await this.rpc.paneSendInput(a.snap.paneId, text);
     }
 
-    async readPane(agentId: string, lines = 200): Promise<{ text: string; revision: number }> {
+    async sendKeys(agentId: string, keys: string[]): Promise<void> {
         const a = this.must(agentId);
-        const res = await this.rpc.paneRead(a.snap.paneId, { lines, source: "visible" });
+        await this.rpc.paneSendKeys(a.snap.paneId, keys);
+    }
+
+    /** 读滚动缓冲（recent）而非仅可见屏：对话历史随缓冲保留 */
+    async readPane(agentId: string, lines = 500): Promise<{ text: string; revision: number }> {
+        const a = this.must(agentId);
+        const res = await this.rpc.paneRead(a.snap.paneId, { lines, source: "recent" });
         return { text: res.text, revision: res.revision };
     }
 

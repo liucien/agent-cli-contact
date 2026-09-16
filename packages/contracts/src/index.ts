@@ -183,6 +183,8 @@ export type RpcMethod =
     | "agent.create"
     | "agent.remove"
     | "agent.syncConfig"
+    | "agent.sendKeys"
+    | "agent.history"
     | "editor.open"
     | "settings.update"
     | "setup.install"
@@ -222,6 +224,27 @@ export interface AgentCreateParams {
 
 export interface AgentIdParams {
     agentId: string;
+}
+
+/** 向 agent pane 发送按键序列（TUI 菜单导航：'Down'/'Up'/'Enter'/'Esc' 等） */
+export interface AgentSendKeysParams {
+    agentId: string;
+    keys: string[];
+}
+
+/**
+ * 对话历史记录（gateway 自建：全屏 TUI 无终端 scrollback，历史由 gateway
+ * 在 prompt 注入与 turn 结束时记账）。user = 注入的指令（含 mesh/定时任务
+ * 前缀）；assistant = turn 结束（working → done/idle/blocked）时的屏幕帧。
+ */
+export interface ThreadRecord {
+    role: "user" | "assistant";
+    text: string;
+    at: number;
+}
+
+export interface AgentHistoryResult {
+    items: ThreadRecord[];
 }
 
 export interface AgentApplyConfigParams {

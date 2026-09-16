@@ -84,6 +84,7 @@ export function App() {
                         projection={projection}
                         agent={agent}
                         paneText={agent ? (state.panes[agent.id] ?? "") : ""}
+                        history={state.history}
                         selectedWorkspaceId={state.selectedWorkspaceId}
                         composingWorkspaceId={state.composingWorkspaceId}
                         composerFocusSeq={state.composerFocusSeq}

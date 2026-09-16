@@ -26,13 +26,20 @@ export class MeshRelay {
 
     private onDirty: () => void;
     private notify: (level: "info" | "warn", text: string) => void;
+    private onInject?: (to: string, text: string) => void;
 
     constructor(
         private runtime: AgentRuntime,
-        opts: { onDirty: () => void; notify: (level: "info" | "warn", text: string) => void },
+        opts: {
+            onDirty: () => void;
+            notify: (level: "info" | "warn", text: string) => void;
+            /** 注入成功回调（对话历史记账用） */
+            onInject?: (to: string, text: string) => void;
+        },
     ) {
         this.onDirty = opts.onDirty;
         this.notify = opts.notify;
+        this.onInject = opts.onInject;
         runtime.onStatusChange((agentId, from, to) => this.handleStatusChange(agentId, from, to));
     }
 
@@ -159,7 +166,9 @@ export class MeshRelay {
                 : msg.from === "scheduler"
                   ? "定时任务"
                   : `来自 ${msg.from}`;
-        await this.runtime.prompt(msg.to, `[mesh · ${label}] ${msg.body}`);
+        const text = `[mesh · ${label}] ${msg.body}`;
+        await this.runtime.prompt(msg.to, text);
+        this.onInject?.(msg.to, text);
         msg.status = "injected";
         msg.injectedAt = Date.now();
         this.pushTimeline({ kind: "system", text: `已注入 ${msg.from} → ${msg.to}` });

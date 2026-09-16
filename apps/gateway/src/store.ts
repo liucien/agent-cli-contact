@@ -28,6 +28,10 @@ export interface PersistedState {
     schedules: Omit<ScheduleSnapshot, "nextFireAt" | "humanized" | "lastRun">[];
     scheduleRuns: NonNullable<ScheduleSnapshot["lastRun"]>[];
     settings?: GatewaySettings;
+    /** gateway 自建对话历史（agentId -> 记录） */
+    threads?: Record<string, import("@agent-cli-contact/contracts").ThreadRecord[]>;
+    /** agent 配置记账（agentId -> 配置），herdr 不感知，需 gateway 持久化 */
+    agentConfigs?: Record<string, import("@agent-cli-contact/contracts").AgentConfig>;
 }
 
 export function loadState(): PersistedState | null {
@@ -39,10 +43,18 @@ export function loadState(): PersistedState | null {
 }
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let firstQueuedAt = 0;
 
-/** 去抖 + 原子写 */
+const DEBOUNCE_MS = 300;
+/** 高频 onDirty 下纯去抖会饥饿（每次调用重置计时器），设最大等待强制落盘 */
+const MAX_WAIT_MS = 1000;
+
+/** 去抖（带最大等待）+ 原子写 */
 export function saveState(state: PersistedState): void {
-    if (saveTimer) clearTimeout(saveTimer);
+    const now = Date.now();
+    if (!saveTimer) firstQueuedAt = now;
+    else clearTimeout(saveTimer);
+    const delay = Math.max(0, Math.min(DEBOUNCE_MS, firstQueuedAt + MAX_WAIT_MS - now));
     saveTimer = setTimeout(() => {
         saveTimer = null;
         try {
@@ -53,5 +65,5 @@ export function saveState(state: PersistedState): void {
         } catch (err) {
             console.error("[gateway] 持久化失败:", err);
         }
-    }, 300);
+    }, delay);
 }

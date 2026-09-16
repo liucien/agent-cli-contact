@@ -10,6 +10,7 @@ import type {
     ShellProjection,
     HerdrEnv,
     AgentTextParams,
+    AgentSendKeysParams,
     AgentCreateParams,
     AgentIdParams,
     AgentApplyConfigParams,
@@ -31,6 +32,7 @@ import type { AgentRuntime } from "./runtime.js";
 import type { MeshRelay } from "./mesh.js";
 import type { Scheduler } from "./scheduler.js";
 import type { ConfigService } from "./configService.js";
+import type { ThreadLog } from "./threadLog.js";
 import { PROVIDER_CAPABILITIES } from "./capabilities.js";
 import { openInEditor } from "./editor.js";
 import { saveImages, withImagePaths } from "./attachments.js";
@@ -43,6 +45,7 @@ export interface RuntimeServices {
     mesh: MeshRelay;
     scheduler: Scheduler;
     configService: ConfigService;
+    threadLog: ThreadLog;
 }
 
 export interface ServerOptions {
@@ -215,12 +218,19 @@ export class GatewayServer {
             case "agent.prompt": {
                 const { agentId, text, images } = p as AgentTextParams;
                 const imagePaths = images?.length ? saveImages(images) : [];
-                await s.runtime.prompt(agentId, withImagePaths(text, imagePaths));
+                const fullText = withImagePaths(text, imagePaths);
+                await s.runtime.prompt(agentId, fullText);
+                s.threadLog.user(agentId, fullText);
                 return null;
             }
             case "agent.sendInput": {
                 const { agentId, text } = p as AgentTextParams;
                 await s.runtime.sendInput(agentId, text);
+                return null;
+            }
+            case "agent.sendKeys": {
+                const { agentId, keys } = p as AgentSendKeysParams;
+                await s.runtime.sendKeys(agentId, keys);
                 return null;
             }
             case "agent.applyConfig": {
@@ -272,9 +282,14 @@ export class GatewayServer {
                 return created;
             }
             case "agent.remove": {
-                await s.runtime.removeAgent((p as AgentIdParams).agentId);
+                const { agentId } = p as AgentIdParams;
+                await s.runtime.removeAgent(agentId);
+                s.threadLog.remove(agentId);
                 this.broadcastShell();
                 return null;
+            }
+            case "agent.history": {
+                return { items: s.threadLog.get((p as AgentIdParams).agentId) };
             }
             case "agent.syncConfig": {
                 await s.runtime.syncConfig((p as AgentIdParams).agentId);

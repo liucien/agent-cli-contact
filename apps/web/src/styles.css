@@ -207,15 +207,49 @@ button.chip:hover {
     cursor: pointer;
     user-select: none;
 }
+/* 多行侧栏行：主行 + 模型行 + hover 展开的附加信息 */
+.item.stack {
+    flex-direction: column;
+    align-items: stretch;
+    flex-wrap: nowrap;
+    gap: 2px;
+}
+.item .row-main {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+.item .row-main .ws-label,
+.item .row-main .agent-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* 右侧固定簇：计数/状态 + 操作按钮，按钮始终贴右 */
+.item .row-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+.item .row-right .sub,
+.item .row-right .badge {
+    margin-left: 0;
+}
 .item .ws-actions {
-    display: none;
+    display: inline-flex;
     align-items: center;
     gap: 2px;
-    margin-left: 4px;
+    /* 用 visibility 占位，hover 出现时右侧不跳动 */
+    visibility: hidden;
 }
 .item:hover .ws-actions,
 .item .ws-actions.show {
-    display: inline-flex;
+    visibility: visible;
 }
 .item .ws-act {
     color: var(--dim);
@@ -249,14 +283,27 @@ button.chip:hover {
     font-size: 11.5px;
     color: var(--dim2);
 }
-.item .cwd {
-    width: 100%;
+/* 模型行：常驻，跟随行首文字缩进 */
+.item .row-model {
+    padding-left: 16px;
+    font-size: 10px;
+    color: var(--dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* 附加信息（项目地址等）：只在 hover 时展开 */
+.item .row-meta {
+    display: none;
     padding-left: 16px;
     font-size: 10px;
     color: var(--dim2);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+.item:hover .row-meta {
+    display: block;
 }
 .st {
     width: 8px;
@@ -428,16 +475,26 @@ button.chip:hover {
     background: var(--panel);
     border-radius: 10px;
     display: flex;
-    align-items: center;
+    align-items: flex-end; /* textarea 变高时按钮贴底 */
     padding: 8px 14px;
     gap: 10px;
 }
-.composer input {
+.composer input,
+.composer textarea {
     flex: 1;
     color: var(--text);
     font-size: 13px;
 }
-.composer input::placeholder {
+.composer textarea {
+    display: block;
+    resize: none;
+    max-height: 140px;
+    overflow-y: auto;
+    line-height: 1.45;
+    padding: 0;
+}
+.composer input::placeholder,
+.composer textarea::placeholder {
     color: var(--dim2);
 }
 .composer .hint {
@@ -1446,6 +1503,146 @@ button.chip:hover {
 }
 .apply:hover {
     background: var(--blue-t);
+}
+
+/* ---------- 会话历史（gateway 自录） ---------- */
+.term .prompt-row {
+    border-left: 2px solid var(--blue);
+    background: #7aa2f70d;
+    border-radius: 0 7px 7px 0;
+    padding: 6px 10px;
+    margin: 12px 0 6px;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.prompt-row .pfx {
+    color: var(--blue-t);
+}
+.prompt-row .pimgs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+}
+.prompt-row .pimg {
+    font-size: 11px;
+    color: var(--dim);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1px 7px;
+    background: var(--panel);
+    white-space: nowrap;
+}
+.term .hist-frame {
+    border-left: 1px solid var(--border);
+    margin: 6px 0 6px 3px;
+    padding-left: 10px;
+}
+.hist-frame .hist-hd {
+    font-size: 10.5px;
+    color: var(--dim2);
+    margin-bottom: 3px;
+}
+.term .thread-divider {
+    text-align: center;
+    color: var(--dim2);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    margin: 12px 0 8px;
+}
+
+/* ---------- 屏幕结构化 block：diff 卡片 ---------- */
+.term .diff-card {
+    border: 1px solid var(--border);
+    background: var(--panel);
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin: 6px 0;
+    font-size: 12px;
+    overflow-x: auto;
+}
+.diff-card .d-add {
+    color: #4ecb60;
+    background: #3fb95014;
+}
+.diff-card .d-del {
+    color: #f7768e;
+    background: #f7768e12;
+}
+.diff-card .d-ctx {
+    color: var(--dim);
+}
+.diff-card .ln {
+    color: var(--dim2);
+}
+
+/* ---------- 屏幕结构化 block：交互菜单卡片 ---------- */
+.term .menu-card {
+    border: 1px solid var(--border2);
+    background: var(--panel);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin: 8px 0;
+    max-width: 640px;
+}
+.menu-card .q {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-strong);
+    margin-bottom: 8px;
+    white-space: pre-wrap;
+}
+.menu-card .opt {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    text-align: left;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 10px;
+    margin-top: 6px;
+    color: var(--text-mid);
+    font-size: 12.5px;
+    cursor: pointer;
+}
+.menu-card .opt:hover:not(:disabled) {
+    background: #191922;
+    border-color: var(--border2);
+}
+.menu-card .opt.sel {
+    border-color: var(--blue);
+    color: #fff;
+}
+.menu-card .opt:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+.menu-card .opt .nb {
+    width: 20px;
+    height: 20px;
+    border-radius: 6px;
+    border: 1px solid var(--border2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    color: var(--dim);
+    flex-shrink: 0;
+}
+.menu-card .opt.sel .nb {
+    border-color: var(--blue);
+    color: var(--blue-t);
+}
+.menu-card .opt .lb {
+    flex: 1;
+    min-width: 0;
+}
+.menu-card .hint {
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--dim2);
 }
 
 /* ---------- composer 图片附件 ---------- */

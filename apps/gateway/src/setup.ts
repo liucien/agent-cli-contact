@@ -57,8 +57,16 @@ export function installHerdr(onLine: (line: string) => void): Promise<void> {
     });
 }
 
-/** 后台常驻启动 herdr server（socket 就绪由外层轮询确认） */
+/** 后台常驻启动 herdr server（socket 就绪由外层轮询确认）。
+ *  清洗 CLAUDE_CODE_* 等继承变量：否则其中启动的 claude agent 会关闭
+ *  transcript 等行为（"inherited CLAUDE_CODE_…" 警告）。 */
 export function startHerdrServer(herdrPath: string): void {
-    const child = spawn(herdrPath, ["server"], { detached: true, stdio: "ignore" });
+    const env: Record<string, string> = {};
+    for (const [k, v] of Object.entries(process.env)) {
+        if (v === undefined) continue;
+        if (k.startsWith("CLAUDE_CODE") || k === "CLAUDECODE" || k.startsWith("ANTHROPIC_")) continue;
+        env[k] = v;
+    }
+    const child = spawn(herdrPath, ["server"], { detached: true, stdio: "ignore", env });
     child.unref();
 }

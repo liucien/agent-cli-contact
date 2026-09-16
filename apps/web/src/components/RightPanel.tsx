@@ -30,7 +30,10 @@ function CollabTab({ projection }: { projection: ShellProjection }) {
     const { messages, rules, timeline } = projection.mesh;
     const enabledRules = rules.filter((r) => r.enabled);
     const queued = messages.filter((m) => m.status === "queued");
-    const blockedAgents = projection.agents.filter((a) => a.status === "blocked");
+    // full 权限 agent 的 blocked 由 gateway 自动放行（~0.8s 后 Enter），不出确认卡片
+    const blockedAgents = projection.agents.filter(
+        (a) => a.status === "blocked" && a.config.permissionMode !== "full",
+    );
 
     const feed = useMemo<FeedItem[]>(() => {
         const items: FeedItem[] = [
@@ -116,7 +119,11 @@ function CollabTab({ projection }: { projection: ShellProjection }) {
                             <button
                                 className="btn pri"
                                 onClick={() =>
-                                    void call("agent.sendInput", { agentId: a.id, text: "y" })
+                                    // Enter 接受 ❯ 选中项（菜单式确认不吃 y/n 文本）
+                                    void call("agent.sendKeys", {
+                                        agentId: a.id,
+                                        keys: ["Enter"],
+                                    })
                                 }
                             >
                                 {t("btn.approve")}
@@ -124,7 +131,7 @@ function CollabTab({ projection }: { projection: ShellProjection }) {
                             <button
                                 className="btn"
                                 onClick={() =>
-                                    void call("agent.sendInput", { agentId: a.id, text: "n" })
+                                    void call("agent.sendKeys", { agentId: a.id, keys: ["Esc"] })
                                 }
                             >
                                 {t("btn.deny")}
@@ -240,7 +247,10 @@ export function RightPanel({
 }) {
     const { t } = useI18n();
     const heldCount = projection.mesh.messages.filter((m) => m.status === "held").length;
-    const blockedCount = projection.agents.filter((a) => a.status === "blocked").length;
+    // full 权限 agent 自动放行，不计入待处理徽标
+    const blockedCount = projection.agents.filter(
+        (a) => a.status === "blocked" && a.config.permissionMode !== "full",
+    ).length;
     const badge = heldCount + blockedCount;
 
     const tabs: { id: RightTab; label: string }[] = [

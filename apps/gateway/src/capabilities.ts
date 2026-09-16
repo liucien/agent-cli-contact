@@ -34,6 +34,27 @@ export const PROVIDER_CAPABILITIES: ProviderCapabilities[] = [
         permissionSwitch: "restart",
         models: [{ id: "gemini-3-pro", label: "Gemini 3 Pro", note: "默认" }],
     },
+    {
+        provider: "Cursor Agent",
+        sessionModelSwitch: "restart",
+        reasoningSwitch: "unsupported",
+        permissionSwitch: "restart",
+        models: [{ id: "claude-3.5-sonnet", label: "Claude 3.5 Sonnet", note: "默认" }],
+    },
+    {
+        provider: "OpenCode",
+        sessionModelSwitch: "restart",
+        reasoningSwitch: "unsupported",
+        permissionSwitch: "restart",
+        models: [{ id: "default", label: "Default Model", note: "默认" }],
+    },
+    {
+        provider: "Pi",
+        sessionModelSwitch: "restart",
+        reasoningSwitch: "unsupported",
+        permissionSwitch: "restart",
+        models: [{ id: "default", label: "Default Model", note: "默认" }],
+    },
 ];
 
 export function capabilitiesFor(provider: string): ProviderCapabilities {

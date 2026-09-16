@@ -16,16 +16,16 @@ export type Block =
     | { type: "diff"; lines: { kind: DiffLineKind; text: string }[] }
     | { type: "menu"; question: string | null; options: MenuOption[]; hint: string | null };
 
-const OPTION_RE = /^(\s*)(❯)?\s*(\d+)\.\s+(.*)$/;
-/** 注意：不含 shift+tab —— 它常出现在选项 label 内部，真正的 hint 是 "Esc to …" 这类 */
-const HINT_RE = /esc to|tab to|enter to/i;
+const OPTION_RE = /^(\s*)([❯>])?\s*(\d+)\.\s+(.*)$/;
+/** 注意：真正的 hint 是 "Esc to …"、"tab Amend" 这类按键导航提示 */
+const HINT_RE = /esc to|tab to|enter to|navigate|tab amend/i;
 /** TUI 水平分隔线：仅由 ─ / ━ / - 重复组成 */
 const RULE_RE = /^\s*[─━-]{3,}\s*$/;
 const DIFF_ADD_RE = /^(?:\s*\d+\s*\+|\s*\+\s)/;
 const DIFF_DEL_RE = /^(?:\s*\d+\s*-|\s*-\s)/;
 const DIFF_CTX_RE = /^\s*\d+\s/;
 /** 菜单只在屏幕尾部生效的窗口（非空行数） */
-const MENU_TAIL_WINDOW = 18;
+const MENU_TAIL_WINDOW = 25;
 
 function indentOf(line: string): number {
     const m = line.match(/^\s*/);
@@ -52,10 +52,9 @@ function scanTailMenu(lines: string[]): MenuScan | null {
             continue;
         }
         // 以 "1." 起始的选项串；编号必须逐个递增。
-        // 折行判定基准：编号所在列（❯ 前缀不算），比它更深的缩进都是上一选项的折行
         const numCol = (lines[i] ?? "").search(/\d/);
         const options: MenuOption[] = [
-            { num: 1, label: (first[4] ?? "").trim(), selected: first[2] === "❯" },
+            { num: 1, label: (first[4] ?? "").trim(), selected: Boolean(first[2]) },
         ];
         let expected = 2;
         let lastOpt = i;
@@ -67,21 +66,32 @@ function scanTailMenu(lines: string[]): MenuScan | null {
                 options.push({
                     num: expected,
                     label: (om[4] ?? "").trim(),
-                    selected: om[2] === "❯",
+                    selected: Boolean(om[2]),
                 });
                 expected++;
                 lastOpt = j;
                 j++;
                 continue;
             }
-            // 折行优先于 hint：比编号列更深缩进的非空行始终归上一选项
-            // （即使它长得像 hint，如 label 里的 "(shift+tab)"）
-            if (!om && line.trim() !== "" && indentOf(line) > numCol) {
-                const prev = options[options.length - 1];
-                if (prev) prev.label += ` ${line.trim()}`;
-                lastOpt = j;
-                j++;
-                continue;
+            // 折行：不是 hint / 分隔线 / 空行，且（自身缩进深于编号列，或后续 1~3 行内有下一选项）
+            if (!om && line.trim() !== "" && !HINT_RE.test(line) && !RULE_RE.test(line)) {
+                let isWrap = indentOf(line) > numCol;
+                if (!isWrap) {
+                    for (let look = 1; look <= 3 && j + look < lines.length; look++) {
+                        const nextM = (lines[j + look] ?? "").match(OPTION_RE);
+                        if (nextM && Number(nextM[3]) === expected) {
+                            isWrap = true;
+                            break;
+                        }
+                    }
+                }
+                if (isWrap) {
+                    const prev = options[options.length - 1];
+                    if (prev) prev.label += ` ${line.trim()}`;
+                    lastOpt = j;
+                    j++;
+                    continue;
+                }
             }
             // 其余（基准缩进处的 hint、空行、普通输出）→ 选项串结束，hint 由后续扫描处理
             break;
@@ -102,31 +112,33 @@ function scanTailMenu(lines: string[]): MenuScan | null {
             : 0;
     if (best.firstOpt < cutoff) return null;
 
-    // hint：选项后第一个非空行（若匹配提示词）
+    // hint：选项后连续的提示行
     let end = best.lastOpt;
-    let hint: string | null = null;
+    const hintLines: string[] = [];
     for (let k = best.lastOpt + 1; k < lines.length; k++) {
         const tline = (lines[k] ?? "").trim();
         if (tline === "") continue;
         if (HINT_RE.test(tline)) {
-            hint = tline;
+            hintLines.push(tline);
             end = k;
+        } else {
+            break;
         }
-        break;
     }
+    const hint = hintLines.length > 0 ? hintLines.join(" · ") : null;
 
-    // question：首个选项上方最近的非空行（分隔线则视为无 question）
+    // question：首个选项上方所有相关的提示行（直到分隔线或上限 20 行）
     let start = best.firstOpt;
-    let question: string | null = null;
-    for (let k = best.firstOpt - 1; k >= 0; k--) {
+    const qLines: string[] = [];
+    for (let k = best.firstOpt - 1; k >= 0 && best.firstOpt - k <= 20; k--) {
         const raw = lines[k] ?? "";
-        if (raw.trim() === "") continue;
-        if (!RULE_RE.test(raw)) {
-            question = raw.trim();
-            start = k;
-        }
-        break;
+        if (RULE_RE.test(raw)) break;
+        qLines.unshift(raw);
+        start = k;
     }
+    while (qLines.length > 0 && qLines[0]?.trim() === "") qLines.shift();
+    while (qLines.length > 0 && qLines[qLines.length - 1]?.trim() === "") qLines.pop();
+    const question = qLines.length > 0 ? qLines.join("\n") : null;
 
     return {
         start,

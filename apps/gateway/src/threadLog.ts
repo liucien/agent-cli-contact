@@ -10,6 +10,7 @@
  */
 import type { ThreadRecord } from "@agent-cli-contact/contracts";
 import type { AgentRuntime } from "./runtime.js";
+import { readAgentTranscript, sanitizePaneText } from "./transcript.js";
 
 const MAX_RECORDS = 60;
 
@@ -34,6 +35,25 @@ export class ThreadLog {
     }
 
     get(agentId: string): ThreadRecord[] {
+        try {
+            const sessionInfo = this.runtime.getSessionInfo(agentId);
+            const agent = this.runtime.getAgent(agentId);
+            if (agent && sessionInfo?.session?.value) {
+                const parsed = readAgentTranscript(agent.provider, sessionInfo.session.value, sessionInfo.cwd);
+                if (parsed && parsed.length > 0) {
+                    const memRecords = this.threads.get(agentId) ?? [];
+                    const pendingUserMsgs = memRecords.filter(
+                        (r) => r.role === "user" && !parsed.some((p) => p.text.trim() === r.text.trim()),
+                    );
+                    if (pendingUserMsgs.length > 0) {
+                        return [...parsed, ...pendingUserMsgs];
+                    }
+                    return parsed;
+                }
+            }
+        } catch {
+            // 降级使用内部缓存
+        }
         return this.threads.get(agentId) ?? [];
     }
 
@@ -45,15 +65,27 @@ export class ThreadLog {
         return Object.fromEntries(this.threads);
     }
 
-    /** turn 结束：存当前屏幕帧（与上一 assistant 帧相同则跳过） */
+    /** turn 结束：优先从结构化 transcript 取，fallback 读当前屏幕并降噪 */
     private async captureFrame(agentId: string): Promise<void> {
         try {
+            const sessionInfo = this.runtime.getSessionInfo(agentId);
+            const agent = this.runtime.getAgent(agentId);
+            if (agent && sessionInfo?.session?.value) {
+                const parsed = readAgentTranscript(agent.provider, sessionInfo.session.value, sessionInfo.cwd);
+                if (parsed && parsed.length > 0) {
+                    this.threads.set(agentId, parsed);
+                    this.onDirty();
+                    return;
+                }
+            }
+
             const { text } = await this.runtime.readPane(agentId);
-            if (!text.trim()) return;
+            const cleaned = sanitizePaneText(text);
+            if (!cleaned.trim()) return;
             const items = this.threads.get(agentId) ?? [];
             const lastAssistant = [...items].reverse().find((r) => r.role === "assistant");
-            if (lastAssistant?.text === text) return;
-            this.push(agentId, { role: "assistant", text, at: Date.now() });
+            if (lastAssistant?.text === cleaned) return;
+            this.push(agentId, { role: "assistant", text: cleaned, at: Date.now() });
         } catch {
             // agent 可能已消失
         }

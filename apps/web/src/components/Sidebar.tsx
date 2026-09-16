@@ -1,4 +1,4 @@
-import { Fragment } from "react";
+import { Fragment, useState, useMemo, useEffect } from "react";
 import type {
     AgentSnapshot,
     ShellProjection,
@@ -12,9 +12,11 @@ import {
     confirmDialog,
     createWorkspace,
     promptDialog,
+    renameAgent,
     removeAgent,
     selectAgent,
     selectWorkspace,
+    type ComposingAgentInfo,
 } from "../store";
 import { modelLabel, statusClass } from "../util";
 import { useI18n } from "../i18n";
@@ -61,11 +63,15 @@ export function Sidebar({
     selectedWorkspaceId,
     selectedAgentId,
     composingWorkspaceId,
+    composingAgent,
+    connectingAgentId,
 }: {
     projection: ShellProjection;
     selectedWorkspaceId: string | null;
     selectedAgentId: string | null;
     composingWorkspaceId: string | null;
+    composingAgent?: ComposingAgentInfo | null;
+    connectingAgentId?: string | null;
 }) {
     const { t } = useI18n();
 
@@ -115,6 +121,24 @@ export function Sidebar({
         call("workspace.close", params).catch(() => undefined);
     };
 
+    const [pickerWorkspaceId, setPickerWorkspaceId] = useState<string | null>(null);
+
+    const availableAgents = useMemo(() => {
+        const list = (projection.availableAgents ?? []).filter((a) => a.installed);
+        if (list.length > 0) return list;
+        return [
+            { kind: "claude", label: "Claude Code", defaultPrefix: "claude", installed: true },
+            { kind: "agy", label: "Antigravity (agy)", defaultPrefix: "agy", installed: true },
+            { kind: "codex", label: "Codex", defaultPrefix: "codex", installed: true },
+        ];
+    }, [projection.availableAgents]);
+
+    const onRenameAgent = async (a: AgentSnapshot) => {
+        const name = await promptDialog({ title: t("agent.promptRename"), defaultValue: a.name });
+        if (!name || name === a.name) return;
+        await renameAgent(a.id, name.trim());
+    };
+
     const onOpenEditor = (w: WorkspaceSnapshot) => {
         const params: WorkspaceIdParams = { workspaceId: w.id };
         call("editor.open", params).catch(() => undefined);
@@ -137,7 +161,7 @@ export function Sidebar({
                 return (
                     <Fragment key={w.id}>
                         <div
-                            className={`item stack ws-item${w.id === selectedWorkspaceId ? " active" : ""}`}
+                            className={`item stack ws-item${w.id === selectedWorkspaceId ? " active" : ""}${pickerWorkspaceId === w.id ? " has-picker" : ""}`}
                             onClick={() => selectWorkspace(w.id)}
                             onDoubleClick={() => void onRename(w)}
                         >
@@ -147,18 +171,63 @@ export function Sidebar({
                                 </span>
                                 <span className="row-right">
                                     <span className="sub">{w.agentCount}</span>
-                                    <span className={`ws-actions${composing ? " show" : ""}`}>
+                                    <span
+                                        className={`ws-actions${composing || pickerWorkspaceId === w.id ? " show" : ""}`}
+                                    >
                                         <button
                                             className="ws-act compose"
                                             title={t("agent.compose")}
                                             disabled={composing}
                                             onClick={(e) => {
                                                 e.stopPropagation();
-                                                composeAgent(w.id);
+                                                setPickerWorkspaceId((prev) =>
+                                                    prev === w.id ? null : w.id,
+                                                );
                                             }}
                                         >
-                                            {composing ? "…" : "✎"}
+                                            {composing ? "…" : "+"}
                                         </button>
+                                        {pickerWorkspaceId === w.id && (
+                                            <>
+                                                <div
+                                                    className="menu-scrim"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setPickerWorkspaceId(null);
+                                                    }}
+                                                />
+                                                <div
+                                                    className="agent-picker-menu"
+                                                    onClick={(e) => e.stopPropagation()}
+                                                >
+                                                    <div className="agent-picker-header">
+                                                        {t("agent.selectAgent")}
+                                                    </div>
+                                                    {availableAgents.map((ag) => (
+                                                        <button
+                                                            key={ag.kind}
+                                                            className="agent-picker-item"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setPickerWorkspaceId(null);
+                                                                composeAgent(
+                                                                    w.id,
+                                                                    ag.kind,
+                                                                    ag.defaultPrefix,
+                                                                );
+                                                            }}
+                                                        >
+                                                            <span className="agent-picker-kind">
+                                                                {ag.kind}
+                                                            </span>
+                                                            <span className="agent-picker-label">
+                                                                {ag.label}
+                                                            </span>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </>
+                                        )}
                                         {w.cwd && (
                                             <button
                                                 className="ws-act"
@@ -188,26 +257,65 @@ export function Sidebar({
                             </div>
                             <MetaRows rows={workspaceMeta(w)} />
                         </div>
-                        {wsAgents.length === 0 && (
+                        {wsAgents.length === 0 && !(composingAgent && composingAgent.workspaceId === w.id) && (
                             <div className="agent-empty">{t("side.noAgents")}</div>
+                        )}
+                        {composingAgent && composingAgent.workspaceId === w.id && (
+                            <div className="item stack ws-item agent-row composing-row active">
+                                <div className="row-main">
+                                    <span className="pulse-spin" style={{ margin: "0 2px" }} />
+                                    <span className="agent-name composing-name">
+                                        {composingAgent.name}
+                                    </span>
+                                    <span className="row-right">
+                                        <span className="badge loading-badge">
+                                            {t("agent.connectingStatus")}
+                                        </span>
+                                    </span>
+                                </div>
+                            </div>
                         )}
                         {wsAgents.map((a) => (
                             <div
                                 key={a.id}
                                 className={`item stack ws-item agent-row${a.id === selectedAgentId ? " active" : ""}`}
                                 onClick={() => selectAgent(a.id)}
+                                onDoubleClick={(e) => {
+                                    e.stopPropagation();
+                                    void onRenameAgent(a);
+                                }}
                             >
                                 <div className="row-main">
-                                    <span className={`st ${statusClass(a.status)}`} />
-                                    <span className="agent-name">{a.name}</span>
+                                    {connectingAgentId === a.id ? (
+                                        <span className="pulse-spin" style={{ margin: "0 2px" }} />
+                                    ) : (
+                                        <span className={`st ${statusClass(a.status)}`} />
+                                    )}
+                                    <span className="agent-name" title={t("agent.promptRename")}>
+                                        {a.name}
+                                    </span>
                                     <span className="row-right">
-                                        {a.status === "blocked" &&
-                                        a.config.permissionMode !== "full" ? (
+                                        {connectingAgentId === a.id ? (
+                                            <span className="badge loading-badge">
+                                                {t("agent.connectingStatus")}
+                                            </span>
+                                        ) : a.status === "blocked" &&
+                                          a.config.permissionMode !== "full" ? (
                                             <span className="badge">{t("side.needsConfirm")}</span>
                                         ) : a.status === "done" ? (
                                             <span className="sub prov">✓ done</span>
                                         ) : null}
                                         <span className="ws-actions">
+                                            <button
+                                                className="ws-act"
+                                                title={t("agent.rename")}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    void onRenameAgent(a);
+                                                }}
+                                            >
+                                                ✎
+                                            </button>
                                             <button
                                                 className="ws-act"
                                                 title={t("side.closeAgent")}

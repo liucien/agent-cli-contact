@@ -143,12 +143,22 @@ export interface ProviderCapabilities {
     models: { id: string; label: string; note: string }[];
 }
 
+// ---------- 可选 Agent 类型 ----------
+
+export interface AvailableAgent {
+    kind: string;
+    label: string;
+    defaultPrefix: string;
+    installed: boolean;
+}
+
 // ---------- 全量投影 ----------
 
 export interface ShellProjection {
     herdr: HerdrEnv;
     workspaces: WorkspaceSnapshot[];
     agents: AgentSnapshot[];
+    availableAgents: AvailableAgent[];
     schedules: ScheduleSnapshot[];
     mesh: {
         messages: MeshMessage[];
@@ -181,6 +191,7 @@ export type RpcMethod =
     | "workspace.close"
     | "workspace.focus"
     | "agent.create"
+    | "agent.rename"
     | "agent.remove"
     | "agent.syncConfig"
     | "agent.sendKeys"
@@ -220,6 +231,12 @@ export interface AgentTextParams {
 export interface AgentCreateParams {
     workspaceId: string;
     name: string;
+    kind?: string;
+}
+
+export interface AgentRenameParams {
+    agentId: string;
+    name: string;
 }
 
 export interface AgentIdParams {
@@ -232,15 +249,24 @@ export interface AgentSendKeysParams {
     keys: string[];
 }
 
+export interface ToolCallItem {
+    name: string;
+    summary?: string;
+    status?: "running" | "done" | "error";
+}
+
 /**
- * 对话历史记录（gateway 自建：全屏 TUI 无终端 scrollback，历史由 gateway
- * 在 prompt 注入与 turn 结束时记账）。user = 注入的指令（含 mesh/定时任务
- * 前缀）；assistant = turn 结束（working → done/idle/blocked）时的屏幕帧。
+ * 对话历史记录（gateway 自建 / 结构化日志提取）。
+ * 支持提取到的 thinking 思考链、toolCalls 工具执行和 mesh 协作源。
  */
 export interface ThreadRecord {
-    role: "user" | "assistant";
+    id?: string;
+    role: "user" | "assistant" | "system";
     text: string;
     at: number;
+    thinking?: string;
+    toolCalls?: ToolCallItem[];
+    meshInfo?: { from: string; to: string; kind?: string };
 }
 
 export interface AgentHistoryResult {

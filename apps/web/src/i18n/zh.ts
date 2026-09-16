@@ -34,6 +34,17 @@ export const zh = {
     // ---------- agent 管理 ----------
     "agent.compose": "新建 agent 聊天",
     "agent.confirmClose": "关闭 agent {name}？",
+    "agent.rename": "重命名 agent",
+    "agent.promptRename": "新的 agent 名称：",
+    "agent.selectAgent": "选择 Agent 类型",
+    "agent.initializing": "正在初始化终端…",
+    "agent.startingAgent": "正在启动 {name}…",
+    "agent.connectingTerminal": "正在连接 {name} 终端…",
+    "agent.connectingHint": "herdr 正在分配 PTY 终端会话并启动 {kind}，就绪后即可开始交互。",
+    "agent.connectingStatus": "连接终端中…",
+    "agent.stepPane": "分配 PTY 终端 Pane",
+    "agent.stepSession": "注册 herdr 会话",
+    "agent.stepReady": "等待终端环境就绪",
 
     // ---------- 主区 ----------
     "main.emptyShell": "新建项目并添加 agent，即可开始",
@@ -44,7 +55,13 @@ export const zh = {
     "main.meshView": "Mesh 视图",
     "main.openEditor": "在编辑器打开",
     "main.inputPlaceholder": "向 {name} 发送指令…",
+    "main.inputConnecting": "终端正在初始化连接中，就绪后即可交互…",
+    "main.initializingBtn": "正在初始化…",
     "main.kbdHint": "⏎ 发送 · ⇧⏎ 换行 · ⌘⇧M 切换模型 · ⌘⇧P 切换权限",
+    "main.toggleTerminal": "原始终端",
+    "main.toggleChat": "对话视图",
+    "main.thinking": "思考过程",
+    "main.meshRelay": "协作中继 · 来自 {from}",
     "main.send": "发送",
 
     // ---------- 图片附件 ----------

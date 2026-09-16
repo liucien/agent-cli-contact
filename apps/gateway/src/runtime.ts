@@ -37,8 +37,11 @@ export interface AgentRuntime {
     focusWorkspace(workspaceId: string): Promise<void>;
 
     // ---- agent 生命周期 ----
-    createAgent(workspaceId: string, name: string): Promise<AgentSnapshot>;
+    createAgent(workspaceId: string, name: string, kind?: string): Promise<AgentSnapshot>;
+    renameAgent(agentId: string, name: string): Promise<void>;
     removeAgent(agentId: string): Promise<void>;
     /** 按需重读 provider 侧的真实配置（如 Claude 会话文件中的模型） */
     syncConfig(agentId: string): Promise<void>;
+    /** 获取底层会话详情与 cwd（供结构化 transcript 读取） */
+    getSessionInfo(agentId: string): { session: { agent?: string; value: string; source?: string } | null; cwd: string | null } | undefined;
 }

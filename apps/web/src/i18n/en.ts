@@ -36,6 +36,17 @@ export const en = {
     // ---------- agent management ----------
     "agent.compose": "New agent chat",
     "agent.confirmClose": "Close agent {name}?",
+    "agent.rename": "Rename agent",
+    "agent.promptRename": "New agent name:",
+    "agent.selectAgent": "Select Agent Type",
+    "agent.initializing": "Initializing terminal…",
+    "agent.startingAgent": "Starting {name}…",
+    "agent.connectingTerminal": "Connecting {name} terminal…",
+    "agent.connectingHint": "herdr is allocating a PTY pane and launching {kind}. Ready for interaction shortly.",
+    "agent.connectingStatus": "Connecting…",
+    "agent.stepPane": "Allocate PTY pane",
+    "agent.stepSession": "Register herdr session",
+    "agent.stepReady": "Wait for terminal readiness",
 
     // ---------- main pane ----------
     "main.emptyShell": "Create a project and add an agent to get started",
@@ -46,7 +57,13 @@ export const en = {
     "main.meshView": "Mesh view",
     "main.openEditor": "Open in editor",
     "main.inputPlaceholder": "Send instructions to {name}…",
+    "main.inputConnecting": "Terminal is connecting, interaction will be enabled shortly…",
+    "main.initializingBtn": "Initializing…",
     "main.kbdHint": "⏎ send · ⇧⏎ newline · ⌘⇧M switch model · ⌘⇧P switch permissions",
+    "main.toggleTerminal": "Raw Terminal",
+    "main.toggleChat": "Chat View",
+    "main.thinking": "Thinking Process",
+    "main.meshRelay": "Relay · from {from}",
     "main.send": "Send",
 
     // ---------- image attachments ----------

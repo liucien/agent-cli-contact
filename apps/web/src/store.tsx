@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import type {
     AgentCreateParams,
+    AgentRenameParams,
     AgentHistoryResult,
     AgentIdParams,
     AgentSnapshot,
@@ -27,19 +28,24 @@ export type DialogState =
     | { id: number; kind: "prompt"; title: string; defaultValue?: string; placeholder?: string }
     | { id: number; kind: "confirm"; title: string; body?: string; danger?: boolean };
 
+export interface ComposingAgentInfo {
+    workspaceId: string;
+    name: string;
+    kind: string;
+}
+
 export interface AppState {
     projection: ShellProjection | null;
     connected: boolean;
-    /** agentId -> 当前终端屏幕文本 */
+    /** agentId -> 最近屏幕文本 */
     panes: Record<string, string>;
     selectedWorkspaceId: string | null;
     selectedAgentId: string | null;
     rightTab: RightTab;
     screen: Screen;
     toasts: Toast[];
-    /** 配置弹层：打开时为 agentId */
+    /** 当前打开配置弹层的 agentId（null 关） */
     configAgentId: string | null;
-    /** 设置弹层是否打开 */
     settingsOpen: boolean;
     /** mesh 全屏视图右侧详情选中的一对 agent */
     meshPair: [string, string] | null;
@@ -47,6 +53,12 @@ export interface AppState {
     setupLog: string[];
     /** compose（一键新建 agent 聊天）进行中的 workspaceId，herdr 启动可达 ~10s */
     composingWorkspaceId: string | null;
+    /** 正在创建的 agent 描述信息（用于 loading 卡片与侧栏占位） */
+    composingAgent: ComposingAgentInfo | null;
+    /** 刚创建完成、正在等待终端就绪的 agentId */
+    connectingAgentId: string | null;
+    /** 用户当前是否停留在正在创建的 agent 的 loading 视图 */
+    viewingComposing: boolean;
     /** 递增信号：compose 成功后主区 composer 自动聚焦 */
     composerFocusSeq: number;
     /** 当前打开的应用内对话框（一次一个） */
@@ -69,6 +81,9 @@ let state: AppState = {
     meshPair: null,
     setupLog: [],
     composingWorkspaceId: null,
+    composingAgent: null,
+    connectingAgentId: null,
+    viewingComposing: false,
     composerFocusSeq: 0,
     dialog: null,
     history: [],
@@ -161,14 +176,32 @@ export function call(method: RpcMethod, params?: unknown): Promise<unknown> {
 
 // ---------- 会话历史 ----------
 
+/** 追加一条本地临时消息（用于用户发送 prompt 时的乐观上屏） */
+export function appendHistory(record: ThreadRecord): void {
+    set({ history: [...state.history, record] });
+}
+
 /** 拉取选中 agent 的会话历史；静默失败（herdr 未就绪等） */
-function fetchHistory(agentId: string): void {
+export function fetchHistory(agentId: string): void {
     const params: AgentIdParams = { agentId };
     wsClient.rpc("agent.history", params).then(
         (result) => {
             if (state.selectedAgentId !== agentId) return; // 拉取期间已切走
             const r = result as AgentHistoryResult | null;
-            set({ history: r?.items ?? [] });
+            const items = r?.items ?? [];
+            // 保留本地尚未包含在远程返回列表里的乐观 user 消息
+            const optimisticPending = state.history.filter(
+                (h) =>
+                    h.role === "user" &&
+                    h.id?.startsWith("temp-u-") &&
+                    !items.some((it) => it.text.trim() === h.text.trim()),
+            );
+            set({
+                history: [...items, ...optimisticPending],
+                ...(state.connectingAgentId === agentId && items.length > 0
+                    ? { connectingAgentId: null, composerFocusSeq: state.composerFocusSeq + 1 }
+                    : {}),
+            });
         },
         () => undefined,
     );
@@ -207,23 +240,74 @@ export function createWorkspace(label: string, cwd?: string): void {
     );
 }
 
-/** Codex 式一键新建 agent 聊天：自动命名 claude-N，成功后选中并聚焦 composer */
-export function composeAgent(workspaceId: string): void {
-    if (state.composingWorkspaceId) return; // 一次一个
-    const count = state.projection?.agents.filter((a) => a.workspaceId === workspaceId).length ?? 0;
-    const params: AgentCreateParams = { workspaceId, name: `claude-${count + 1}` };
-    set({ composingWorkspaceId: workspaceId });
+/** 新建 agent 聊天：支持选择 kind 并按 prefix-N 自动编号，成功后选中并聚焦 composer */
+export function composeAgent(workspaceId: string, kind = "claude", prefix = "claude"): void {
+    if (state.composingWorkspaceId || state.composingAgent) return; // 一次一个
+    const pattern = new RegExp(`^${prefix}-(\\d+)$`);
+    let maxIndex = 0;
+    for (const a of state.projection?.agents ?? []) {
+        if (a.workspaceId === workspaceId) {
+            const m = a.name.match(pattern);
+            if (m && m[1]) {
+                const num = parseInt(m[1], 10);
+                if (num > maxIndex) maxIndex = num;
+            }
+        }
+    }
+    const name = `${prefix}-${maxIndex + 1}`;
+    const params: AgentCreateParams = { workspaceId, name, kind };
+    const compInfo: ComposingAgentInfo = { workspaceId, name, kind };
+    set({
+        composingWorkspaceId: workspaceId,
+        composingAgent: compInfo,
+        viewingComposing: true,
+    });
     call("agent.create", params).then(
         (result) => {
             const agent = result as AgentSnapshot | null;
+            if (agent?.id) {
+                set({
+                    composingWorkspaceId: null,
+                    composingAgent: null,
+                    connectingAgentId: agent.id,
+                    viewingComposing: false,
+                });
+                selectAgent(agent.id);
+                // 15 秒兜底：防止特定 CLI 终端无输出导致卡在 loading
+                setTimeout(() => {
+                    if (state.connectingAgentId === agent.id) {
+                        set({
+                            connectingAgentId: null,
+                            composerFocusSeq: state.composerFocusSeq + 1,
+                        });
+                    }
+                }, 15000);
+            } else {
+                set({
+                    composingWorkspaceId: null,
+                    composingAgent: null,
+                    connectingAgentId: null,
+                    viewingComposing: false,
+                });
+            }
+        },
+        () =>
             set({
                 composingWorkspaceId: null,
-                composerFocusSeq: state.composerFocusSeq + 1,
-            });
-            if (agent?.id) selectAgent(agent.id);
-        },
-        () => set({ composingWorkspaceId: null }),
+                composingAgent: null,
+                connectingAgentId: null,
+                viewingComposing: false,
+            }),
     );
+}
+
+export function renameAgent(agentId: string, name: string): Promise<void> {
+    const params: AgentRenameParams = { agentId, name };
+    return call("agent.rename", params)
+        .then(() => undefined)
+        .catch((err) => {
+            toast("warn", String(err));
+        });
 }
 
 export function removeAgent(agentId: string): void {
@@ -237,6 +321,7 @@ export function selectAgent(agentId: string, opts?: { toWorkbench?: boolean }): 
     set({
         selectedAgentId: agentId,
         selectedWorkspaceId: agent ? agent.workspaceId : state.selectedWorkspaceId,
+        viewingComposing: false,
         ...(opts?.toWorkbench ? { screen: "workbench" as Screen } : {}),
     });
     wsClient.switchPane(agentId);
@@ -280,6 +365,8 @@ export function selectedAgent(s: AppState): AgentSnapshot | null {
 
 // ---------- WebSocket 接线 ----------
 
+let lastLiveFetch = 0;
+
 wsClient.setHandlers({
     onShell(projection) {
         let { selectedWorkspaceId, selectedAgentId } = state;
@@ -320,6 +407,19 @@ wsClient.setHandlers({
     onPane(agentId, text) {
         if (typeof text !== "string") return; // 防御：异常载荷不覆盖已有 pane 文本
         set({ panes: { ...state.panes, [agentId]: text } });
+        if (state.connectingAgentId === agentId && text.trim().length > 0) {
+            set({
+                connectingAgentId: null,
+                composerFocusSeq: state.composerFocusSeq + 1,
+            });
+        }
+        if (agentId === state.selectedAgentId) {
+            const now = Date.now();
+            if (now - lastLiveFetch > 1200) {
+                lastLiveFetch = now;
+                fetchHistory(agentId);
+            }
+        }
     },
     onNotify(level, text) {
         toast(level, text);

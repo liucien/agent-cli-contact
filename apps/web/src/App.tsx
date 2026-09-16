@@ -79,6 +79,8 @@ export function App() {
                         selectedWorkspaceId={state.selectedWorkspaceId}
                         selectedAgentId={state.selectedAgentId}
                         composingWorkspaceId={state.composingWorkspaceId}
+                        composingAgent={state.composingAgent}
+                        connectingAgentId={state.connectingAgentId}
                     />
                     <MainPane
                         projection={projection}
@@ -87,6 +89,9 @@ export function App() {
                         history={state.history}
                         selectedWorkspaceId={state.selectedWorkspaceId}
                         composingWorkspaceId={state.composingWorkspaceId}
+                        composingAgent={state.composingAgent}
+                        connectingAgentId={state.connectingAgentId}
+                        viewingComposing={state.viewingComposing}
                         composerFocusSeq={state.composerFocusSeq}
                     />
                     <RightPanel

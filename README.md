@@ -49,8 +49,8 @@ herdr 0.8 socket 实测语义（herdr-client 依此实现）：普通请求**一
 
 | 功能             | 说明                                                                                                                                                                                                                        |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| herdr 环境引导   | 启动检测 herdr 安装/运行状态，全屏引导页：一键 brew 安装（日志实时回传）、一键无头启动 `herdr server`、就绪自动进入工作台                                                                                                     |
-| 多 agent 总览    | 侧栏四色状态点（working 绿 / blocked 黄 / idle 灰 / done 蓝）、工作区分组、待确认角标；agent 新建（`tab.create`+`agent.start`）/ 关闭                                                                                        |
+| herdr 环境引导   | 启动检测 herdr 安装/运行状态，全屏引导页：一键 brew 安装（日志实时回传）、一键无头启动 `herdr server`、就绪自动进入工作台                                                                                                   |
+| 多 agent 总览    | 侧栏四色状态点（working 绿 / blocked 黄 / idle 灰 / done 蓝）、工作区分组、待确认角标；agent 新建（`tab.create`+`agent.start`）/ 关闭                                                                                       |
 | 终端优先主视图   | `pane.read` 读屏轮询推送（herdr 模式即真实终端内容），composer 经 `agent.prompt` 注入                                                                                                                                       |
 | blocked 一等公民 | 协作面板出确认卡：批准 / 拒绝 经 `pane.send_input` 直接回答                                                                                                                                                                 |
 | Agent Mesh       | Gateway 中继记账（queued/held/injected/denied）、目标非 idle 排队、**三道闸**：中继审批（reply 默认 hold）、每对 10 条/小时限速、A⇄B 循环深度 >3 强制 hold                                                                  |
@@ -60,7 +60,7 @@ herdr 0.8 socket 实测语义（herdr-client 依此实现）：普通请求**一
 | 配置切换         | 三段式配置条 + 三列弹层；per-provider capability 表决定路径：即时（注入 `/model` slash 命令）/ working 中排队到 turn 结束 / 重启会话（MVP 仅记账上报）；配置预设存 Gateway                                                  |
 | 多项目管理       | 侧栏工作区：新建（含 cwd）/ 重命名 / 关闭（最后一个项目保护、焦点回落）/ 切换聚焦；herdr 模式映射 `workspace.create/rename/close/focus`，agent 列表按项目过滤                                                               |
 | 编辑器打开       | pane 头部与项目行 ⧉ 按钮，在 gateway 宿主机用外部编辑器打开项目目录；默认 `code`（VS Code），标题栏 ⚙︎ 设置弹层可自定义命令（cursor / subl / `open -a "WebStorm"` 等）；经 `/bin/sh -lc` 执行，打包 sidecar 下 PATH 亦可解析 |
-| i18n 多语言      | 中/英双语（151 key 对齐），标题栏一键切换，localStorage 持久化；自研轻量 context 实现（零依赖）；服务端产生的数据（消息体/时间线/摘要）按原文透传不翻译                                                                       |
+| i18n 多语言      | 中/英双语（151 key 对齐），标题栏一键切换，localStorage 持久化；自研轻量 context 实现（零依赖）；服务端产生的数据（消息体/时间线/摘要）按原文透传不翻译                                                                     |
 
 ## 尚未实现（按 PLAN 里程碑）
 

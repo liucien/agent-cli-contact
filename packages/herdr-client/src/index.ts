@@ -139,8 +139,11 @@ export class HerdrClient {
             sock.setEncoding("utf8");
             sock.on("connect", () => {
                 sock.write(
-                    JSON.stringify({ id: "sub", method: "events.subscribe", params: { subscriptions } }) +
-                        "\n",
+                    JSON.stringify({
+                        id: "sub",
+                        method: "events.subscribe",
+                        params: { subscriptions },
+                    }) + "\n",
                 );
             });
             sock.on("data", (chunk: string) => {
@@ -158,8 +161,7 @@ export class HerdrClient {
                     }
                     // 首行为 {"id":"sub","result":{type:"subscription_started"}}，其后均为事件
                     if (typeof msg.event === "string") onEvent(msg as unknown as HerdrEvent);
-                    else if (msg.error)
-                        reject(new Error(`订阅失败: ${JSON.stringify(msg.error)}`));
+                    else if (msg.error) reject(new Error(`订阅失败: ${JSON.stringify(msg.error)}`));
                 }
             });
             sock.on("error", (err) => (closedByUs ? resolve() : reject(err)));
@@ -244,7 +246,7 @@ export class HerdrClient {
     }
 
     paneSendKeys(paneId: string, keys: string[]): Promise<unknown> {
-        return this.request("pane.send_input", { pane_id: paneId, keys });
+        return this.request("pane.send_keys", { pane_id: paneId, keys });
     }
 
     paneSendText(paneId: string, text: string): Promise<unknown> {
@@ -272,11 +274,12 @@ export class HerdrClient {
         return this.request("agent.start", { name, kind, pane_id: paneId });
     }
 
+    agentRename(target: string, name: string): Promise<unknown> {
+        return this.request("agent.rename", { target, name });
+    }
+
     /** 订阅 agent 状态与 pane 生命周期事件（专用长连接） */
-    subscribeAgentEvents(
-        paneIds: string[],
-        onEvent: (ev: HerdrEvent) => void,
-    ): HerdrSubscription {
+    subscribeAgentEvents(paneIds: string[], onEvent: (ev: HerdrEvent) => void): HerdrSubscription {
         return this.subscribe(
             [
                 { type: "pane.created" },

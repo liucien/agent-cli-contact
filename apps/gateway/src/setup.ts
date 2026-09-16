@@ -4,7 +4,7 @@
  * `herdr server`（无子命令）即无头前台运行，detached spawn 后台常驻。
  */
 import { spawn, execFile } from "node:child_process";
-import type { HerdrEnv } from "@agent-cli-contact/contracts";
+import type { HerdrEnv, AvailableAgent } from "@agent-cli-contact/contracts";
 import { socketAvailable } from "@agent-cli-contact/herdr-client";
 import { findExecutable, getShell } from "./env";
 
@@ -27,14 +27,114 @@ function getVersionDirect(binPath: string): Promise<string | null> {
     });
 }
 
+const KNOWN_AGENTS: { integration: string; kind: string; label: string; defaultPrefix: string }[] =
+    [
+        { integration: "claude", kind: "claude", label: "Claude Code", defaultPrefix: "claude" },
+        {
+            integration: "antigravity-cli",
+            kind: "agy",
+            label: "Antigravity (agy)",
+            defaultPrefix: "agy",
+        },
+        { integration: "codex", kind: "codex", label: "Codex", defaultPrefix: "codex" },
+        { integration: "cursor", kind: "cursor", label: "Cursor Agent", defaultPrefix: "cursor" },
+        { integration: "opencode", kind: "opencode", label: "OpenCode", defaultPrefix: "opencode" },
+        { integration: "pi", kind: "pi", label: "Pi", defaultPrefix: "pi" },
+        { integration: "gemini", kind: "gemini", label: "Gemini CLI", defaultPrefix: "gemini" },
+        { integration: "devin", kind: "devin", label: "Devin", defaultPrefix: "devin" },
+        {
+            integration: "copilot",
+            kind: "copilot",
+            label: "GitHub Copilot",
+            defaultPrefix: "copilot",
+        },
+        { integration: "droid", kind: "droid", label: "Droid", defaultPrefix: "droid" },
+        { integration: "kimi", kind: "kimi", label: "Kimi Code", defaultPrefix: "kimi" },
+        { integration: "omp", kind: "omp", label: "Oh My Posh", defaultPrefix: "omp" },
+        { integration: "kilo", kind: "kilo", label: "Kilo", defaultPrefix: "kilo" },
+        { integration: "hermes", kind: "hermes", label: "Hermes", defaultPrefix: "hermes" },
+        { integration: "qodercli", kind: "qodercli", label: "Qoder CLI", defaultPrefix: "qoder" },
+        {
+            integration: "mastracode",
+            kind: "mastracode",
+            label: "Mastra Code",
+            defaultPrefix: "mastra",
+        },
+        { integration: "grok", kind: "grok", label: "Grok", defaultPrefix: "grok" },
+    ];
+
+export async function queryAvailableAgents(herdrPath: string | null): Promise<AvailableAgent[]> {
+    if (!herdrPath) {
+        return [{ kind: "claude", label: "Claude Code", defaultPrefix: "claude", installed: true }];
+    }
+    try {
+        const raw = await new Promise<string>((resolve, reject) => {
+            execFile(
+                herdrPath,
+                ["integration", "status"],
+                { timeout: 4000, env: process.env },
+                (err, stdout) => {
+                    if (err) return reject(err);
+                    resolve(stdout || "");
+                },
+            );
+        });
+
+        const parsedStatus = new Map<string, boolean>();
+        for (const line of raw.trim().split("\n")) {
+            const match = line.match(/^([a-zA-Z0-9_-]+):\s*([^()]+)/);
+            if (match && match[1] && match[2]) {
+                const key = match[1].trim();
+                const st = match[2].trim();
+                const installed = !st.startsWith("not installed");
+                parsedStatus.set(key, installed);
+            }
+        }
+
+        const available: AvailableAgent[] = KNOWN_AGENTS.map((a) => ({
+            kind: a.kind,
+            label: a.label,
+            defaultPrefix: a.defaultPrefix,
+            installed: parsedStatus.get(a.integration) ?? false,
+        }));
+
+        for (const [key, installed] of parsedStatus) {
+            if (!KNOWN_AGENTS.some((a) => a.integration === key)) {
+                available.push({
+                    kind: key,
+                    label: key,
+                    defaultPrefix: key,
+                    installed,
+                });
+            }
+        }
+
+        return available;
+    } catch (err) {
+        console.warn("[gateway] 查询 herdr integration status 失败:", err);
+        return [{ kind: "claude", label: "Claude Code", defaultPrefix: "claude", installed: true }];
+    }
+}
+
 interface BinaryCache {
     herdrPath: string | null;
     version?: string;
     brewAvailable: boolean;
+    availableAgents: AvailableAgent[];
 }
 
 let cachedBinary: BinaryCache | null = null;
 let probePromise: Promise<BinaryCache> | null = null;
+
+export function getAvailableAgents(): AvailableAgent[] {
+    return (
+        cachedBinary?.availableAgents ?? [
+            { kind: "claude", label: "Claude Code", defaultPrefix: "claude", installed: true },
+            { kind: "agy", label: "Antigravity (agy)", defaultPrefix: "agy", installed: true },
+            { kind: "codex", label: "Codex", defaultPrefix: "codex", installed: true },
+        ]
+    );
+}
 
 /** 清空缓存，强制下一次 detectHerdr 进行单次全量查询 */
 export function invalidateHerdrCache(): void {
@@ -77,10 +177,13 @@ async function probeBinary(): Promise<BinaryCache> {
         }
     }
 
+    const availableAgents = await queryAvailableAgents(herdrPath);
+
     const info: BinaryCache = {
         herdrPath: herdrPath || null,
         version,
         brewAvailable: !!brewPath,
+        availableAgents,
     };
     cachedBinary = info;
     return info;

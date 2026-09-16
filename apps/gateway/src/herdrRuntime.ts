@@ -26,8 +26,12 @@ const PROVIDER_DISPLAY: Record<string, string> = {
     "claude-code": "Claude Code",
     codex: "Codex",
     agy: "Antigravity",
+    "antigravity-cli": "Antigravity",
     gemini: "Antigravity",
     antigravity: "Antigravity",
+    cursor: "Cursor Agent",
+    opencode: "OpenCode",
+    pi: "Pi",
 };
 
 function defaultConfigFor(provider: string): AgentConfig {
@@ -167,7 +171,10 @@ export class HerdrRuntime implements AgentRuntime {
             next.set(id, {
                 snap: {
                     id,
-                    name: info.name ?? info.display_agent ?? (info.agent ? `${info.agent} · ${info.pane_id}` : id),
+                    name:
+                        info.name ??
+                        info.display_agent ??
+                        (info.agent ? `${info.agent} · ${info.pane_id}` : id),
                     provider,
                     workspaceId: info.workspace_id,
                     paneId: info.pane_id,
@@ -290,9 +297,9 @@ export class HerdrRuntime implements AgentRuntime {
         await this.refresh();
     }
 
-    /** tab.create（继承 workspace cwd，pane 在返回的 root_pane 里）→ agent.start(kind=claude)。
+    /** tab.create（继承 workspace cwd，pane 在返回的 root_pane 里）→ agent.start(kind)。
      *  新 pane 的 shell 需要片刻就绪，agent_pane_busy 时按 400ms 间隔重试（最长 ~8s）。 */
-    async createAgent(workspaceId: string, name: string): Promise<AgentSnapshot> {
+    async createAgent(workspaceId: string, name: string, kind?: string): Promise<AgentSnapshot> {
         const ws = this.workspaces.find((w) => w.id === workspaceId);
         const tabRes = (await this.rpc.tabCreate(workspaceId, name, ws?.cwd)) as {
             root_pane?: { pane_id?: string };
@@ -300,10 +307,12 @@ export class HerdrRuntime implements AgentRuntime {
         const paneId = tabRes.root_pane?.pane_id;
         if (!paneId) throw new Error("tab.create 未返回 root_pane，无法启动 agent");
 
+        const agentKind = kind || "claude";
+
         let lastErr: unknown = null;
         for (let attempt = 0; attempt < 20; attempt++) {
             try {
-                await this.rpc.agentStart(name, "claude", paneId);
+                await this.rpc.agentStart(name, agentKind, paneId);
                 lastErr = null;
                 break;
             } catch (err) {
@@ -316,16 +325,30 @@ export class HerdrRuntime implements AgentRuntime {
             await this.rpc.paneClose(paneId).catch(() => {});
             throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
         }
-        // agent.start 后 herdr 的 agent 检测需要片刻；等 provider 就位再返回（最多 ~3s）
-        for (let attempt = 0; attempt < 6; attempt++) {
+        // agent.start 后 herdr 的 agent 检测需要片刻；等 provider 就位且首帧输出尝试后再返回（最多 ~4s）
+        for (let attempt = 0; attempt < 8; attempt++) {
             await this.refresh();
             const created = [...this.agents.values()].find((a) => a.snap.paneId === paneId);
-            if (created && created.snap.provider !== "unknown") return created.snap;
-            await new Promise((r) => setTimeout(r, 500));
+            if (created && created.snap.provider !== "unknown") {
+                try {
+                    const { text } = await this.readPane(created.snap.id);
+                    if (text && text.trim().length > 0) return created.snap;
+                } catch {}
+                if (attempt >= 2) return created.snap;
+            }
+            await new Promise((r) => setTimeout(r, 400));
         }
         const created = [...this.agents.values()].find((a) => a.snap.paneId === paneId);
         if (!created) throw new Error("agent.start 后未在 agent.list 中发现新 agent");
         return created.snap;
+    }
+
+    async renameAgent(agentId: string, name: string): Promise<void> {
+        const a = this.must(agentId);
+        const trimmed = name.trim();
+        if (!trimmed) throw new Error("Agent 名称不能为空");
+        await this.rpc.agentRename(a.snap.paneId, trimmed);
+        await this.refresh();
     }
 
     /** 按需同步配置（配置弹层打开时调用）：重读 Claude 会话文件里的实际模型 */
@@ -344,6 +367,10 @@ export class HerdrRuntime implements AgentRuntime {
         const a = this.must(agentId);
         await this.rpc.paneClose(a.snap.paneId);
         await this.refresh();
+    }
+
+    getSessionInfo(agentId: string): { session: { agent?: string; value: string; source?: string } | null; cwd: string | null } | undefined {
+        return this.sessions.get(agentId);
     }
 
     onChange(cb: () => void): void {

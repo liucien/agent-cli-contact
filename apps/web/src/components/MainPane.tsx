@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { marked } from "marked";
 import type {
     AgentSendKeysParams,
     AgentSnapshot,
@@ -6,9 +7,21 @@ import type {
     PromptImage,
     ShellProjection,
     ThreadRecord,
+    ToolCallItem,
     WorkspaceIdParams,
 } from "@agent-cli-contact/contracts";
-import { call, composeAgent, openConfig, setScreen, toast } from "../store";
+import {
+    appendHistory,
+    call,
+    composeAgent,
+    fetchHistory,
+    openConfig,
+    promptDialog,
+    renameAgent,
+    setScreen,
+    toast,
+    type ComposingAgentInfo,
+} from "../store";
 import {
     ctxLabel,
     fmtTime,
@@ -77,11 +90,13 @@ function MenuCard({
         [block],
     );
     const [answeredHash, setAnsweredHash] = useState<string | null>(null);
+    const [pendingTarget, setPendingTarget] = useState<number | null>(null);
     const disabled = answeredHash === hash;
 
     // 通用协议：方向键把 ❯ 移到目标项再回车（数字直选只有部分菜单支持）
     const pick = (target: number) => {
         setAnsweredHash(hash);
+        setPendingTarget(target);
         const current = block.options.find((o) => o.selected)?.num ?? 1;
         const delta = target - current;
         const keys = [
@@ -90,22 +105,44 @@ function MenuCard({
         ];
         const params: AgentSendKeysParams = { agentId, keys };
         void call("agent.sendKeys", params);
+        // 自动加速历史与进度刷新
+        setTimeout(() => fetchHistory(agentId), 300);
+        setTimeout(() => fetchHistory(agentId), 1200);
+        // 8 秒超时保护：若由于终端未响应造成卡住，自动解除禁用允许重试
+        setTimeout(() => {
+            setAnsweredHash((prev) => (prev === hash ? null : prev));
+            setPendingTarget((prev) => (prev === target ? null : prev));
+        }, 8000);
     };
 
     return (
         <div className="menu-card">
-            {block.question && <div className="q">{block.question}</div>}
-            {block.options.map((o) => (
-                <button
-                    key={o.num}
-                    className={`opt${o.selected ? " sel" : ""}`}
-                    disabled={disabled}
-                    onClick={() => pick(o.num)}
-                >
-                    <span className="nb">{o.num}</span>
-                    <span className="lb">{o.label}</span>
-                </button>
-            ))}
+            {block.question && (
+                <div className="q" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                    {block.question}
+                </div>
+            )}
+            {block.options.map((o) => {
+                const isPending = disabled && pendingTarget === o.num;
+                return (
+                    <button
+                        key={o.num}
+                        className={`opt${o.selected ? " sel" : ""}${isPending ? " pending" : ""}`}
+                        disabled={disabled}
+                        onClick={() => pick(o.num)}
+                    >
+                        <span className="nb">{isPending ? "⋯" : o.num}</span>
+                        <span className="lb">
+                            {o.label}
+                            {isPending && (
+                                <span style={{ marginLeft: 8, opacity: 0.8, fontSize: "0.85em" }}>
+                                    （正在执行…）
+                                </span>
+                            )}
+                        </span>
+                    </button>
+                );
+            })}
             {block.hint && <div className="hint">{block.hint}</div>}
         </div>
     );
@@ -228,6 +265,205 @@ function ThreadView({
     );
 }
 
+function MarkdownBody({ text }: { text: string }) {
+    const html = useMemo(() => {
+        if (!text) return "";
+        try {
+            return marked.parse(text, { async: false, breaks: true, gfm: true }) as string;
+        } catch {
+            return text;
+        }
+    }, [text]);
+
+    return <div className="md-body" dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
+function ThinkingBlock({ thinking }: { thinking: string }) {
+    const [open, setOpen] = useState(false);
+    const { t } = useI18n();
+    const firstLine = useMemo(() => {
+        const raw = thinking.trim().split("\n")[0] ?? "";
+        return raw.replace(/^[#*`\s]+/, "").slice(0, 48);
+    }, [thinking]);
+
+    return (
+        <div className={`thinking-box${open ? " open" : ""}`}>
+            <button
+                type="button"
+                className="thinking-toggle"
+                onClick={() => setOpen(!open)}
+                title={t("main.thinking")}
+            >
+                <span className="th-caret">{open ? "▾" : "▸"}</span>
+                <span className="th-icon">💭</span>
+                <span className="th-title">{t("main.thinking")}</span>
+                {!open && firstLine && <span className="th-summary">{firstLine}…</span>}
+            </button>
+            {open && <div className="thinking-body">{thinking}</div>}
+        </div>
+    );
+}
+
+function ToolCallsBlock({ toolCalls }: { toolCalls: ToolCallItem[] }) {
+    return (
+        <div className="tools-strip">
+            {toolCalls.map((tc, i) => (
+                <div key={i} className="tool-pill" title={tc.summary || tc.name}>
+                    <span className="tool-bolt">⚡</span>
+                    <span className="tool-name">{tc.name}</span>
+                    {tc.summary && tc.summary !== tc.name && (
+                        <span className="tool-summary">{tc.summary}</span>
+                    )}
+                    <span className="tool-done">✓</span>
+                </div>
+            ))}
+        </div>
+    );
+}
+
+function StreamUserMessage({ rec }: { rec: ThreadRecord }) {
+    const { t } = useI18n();
+    const rawText = rec.text;
+    const isMesh = rawText.startsWith("[mesh ·");
+    let meshFrom = "";
+    let displayText = rawText;
+    if (isMesh) {
+        const match = rawText.match(/^\[mesh · 来自 ([^\]]+)\]\s*([\s\S]*)$/);
+        if (match) {
+            meshFrom = match[1] || "";
+            displayText = match[2] || "";
+        }
+    }
+
+    const idx = displayText.indexOf(IMAGES_MARKER);
+    const main = idx >= 0 ? displayText.slice(0, idx).trimEnd() : displayText;
+    const paths =
+        idx >= 0
+            ? displayText
+                  .slice(idx + IMAGES_MARKER.length)
+                  .split("\n")
+                  .map((s) => s.trim())
+                  .filter((s) => s !== "")
+            : [];
+
+    return (
+        <div className="stream-row user">
+            <div className={`stream-bubble user${isMesh ? " mesh" : ""}`}>
+                {meshFrom && (
+                    <div className="mesh-relay-badge">
+                        <span className="mesh-relay-icon">⚡</span>
+                        <span>{t("main.meshRelay", { from: meshFrom })}</span>
+                    </div>
+                )}
+                <div className="stream-bubble-text">{main}</div>
+                {paths.length > 0 && (
+                    <div className="stream-bubble-imgs">
+                        {paths.map((p, i) => (
+                            <span key={i} className="stream-img-chip" title={p}>
+                                📎 {p.split(/[\\/]/).pop() ?? p}
+                            </span>
+                        ))}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+function StreamAssistantMessage({ rec }: { rec: ThreadRecord }) {
+    const hasStructured = Boolean(rec.thinking || (rec.toolCalls && rec.toolCalls.length > 0));
+    const isDiff = !hasStructured && (rec.text.includes("+++") || rec.text.includes("---"));
+    const diffBlocks = useMemo(() => (isDiff ? parseScreen(rec.text, false) : []), [isDiff, rec.text]);
+
+    return (
+        <div className="stream-row assistant">
+            <div className="stream-bubble assistant">
+                {rec.thinking && <ThinkingBlock thinking={rec.thinking} />}
+                {rec.toolCalls && rec.toolCalls.length > 0 && (
+                    <ToolCallsBlock toolCalls={rec.toolCalls} />
+                )}
+                {isDiff ? (
+                    <div className="diff-wrap">
+                        <Blocks blocks={diffBlocks} agentId="" />
+                    </div>
+                ) : (
+                    rec.text && <MarkdownBody text={rec.text} />
+                )}
+            </div>
+        </div>
+    );
+}
+
+function StreamView({
+    history,
+    paneText,
+    agent,
+    agentId,
+}: {
+    history: ThreadRecord[];
+    paneText: string;
+    agent: AgentSnapshot;
+    agentId: string;
+}) {
+    const { t } = useI18n();
+    const ref = useRef<HTMLDivElement>(null);
+    const liveBlocks = useMemo(() => parseScreen(paneText), [paneText]);
+    const isWorking = agent.status === "working";
+
+    // 实时帧中的交互式菜单（如选择题或权限审批选项）
+    const liveMenu = useMemo(
+        () => liveBlocks.find((b): b is Extract<Block, { type: "menu" }> => b.type === "menu"),
+        [liveBlocks],
+    );
+
+    useEffect(() => {
+        const el = ref.current;
+        if (el) el.scrollTop = el.scrollHeight;
+    }, [history.length, isWorking, paneText]);
+
+    return (
+        <div className="stream-view" ref={ref}>
+            {history.length === 0 && (
+                <div className="stream-empty">
+                    {isWorking ? (
+                        <div className="live-working-card">
+                            <span className="pulse-indicator" />
+                            <span>AI 正在思考 / 执行工具…</span>
+                        </div>
+                    ) : (
+                        <div className="term-empty">{t("main.termEmpty")}</div>
+                    )}
+                </div>
+            )}
+
+            {history.map((rec, i) =>
+                rec.role === "user" ? (
+                    <StreamUserMessage key={rec.id ?? `u-${i}`} rec={rec} />
+                ) : (
+                    <StreamAssistantMessage key={rec.id ?? `a-${i}`} rec={rec} />
+                ),
+            )}
+
+            {liveMenu && (
+                <div className="stream-row assistant live-menu">
+                    <div className="stream-bubble assistant">
+                        <MenuCard block={liveMenu} agentId={agentId} />
+                    </div>
+                </div>
+            )}
+
+            {isWorking && (
+                <div className="stream-row assistant live-working">
+                    <div className="live-working-card">
+                        <span className="pulse-indicator" />
+                        <span>AI 正在思考 / 执行工具…</span>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
 export function MainPane({
     projection,
     agent,
@@ -235,6 +471,9 @@ export function MainPane({
     history,
     selectedWorkspaceId,
     composingWorkspaceId,
+    composingAgent,
+    connectingAgentId,
+    viewingComposing,
     composerFocusSeq,
 }: {
     projection: ShellProjection;
@@ -243,9 +482,13 @@ export function MainPane({
     history: ThreadRecord[];
     selectedWorkspaceId: string | null;
     composingWorkspaceId: string | null;
+    composingAgent?: ComposingAgentInfo | null;
+    connectingAgentId?: string | null;
+    viewingComposing?: boolean;
     composerFocusSeq: number;
 }) {
     const { t } = useI18n();
+    const [showTerminal, setShowTerminal] = useState(false);
     const [input, setInput] = useState("");
     const [images, setImages] = useState<AttachedImage[]>([]);
     const [sending, setSending] = useState(false);
@@ -312,7 +555,26 @@ export function MainPane({
         });
     };
 
-    if (!agent) {
+    const isCreating = Boolean(
+        viewingComposing &&
+        composingAgent &&
+        composingAgent.workspaceId === selectedWorkspaceId
+    );
+
+    const isConnecting = Boolean(
+        connectingAgentId &&
+        agent &&
+        connectingAgentId === agent.id &&
+        (!paneText || paneText.trim().length === 0) &&
+        history.length === 0
+    );
+
+    const isInitializing = isCreating || isConnecting;
+    const activeName = isCreating ? composingAgent!.name : agent?.name ?? "";
+    const activeKind = isCreating ? composingAgent!.kind : agent?.provider ?? "agent";
+    const initStage: "creating" | "connecting" = isCreating ? "creating" : "connecting";
+
+    if (!agent && !isCreating) {
         // 没有任何项目 → 引导创建项目；有项目但没有 agent → hero + 一键新建
         if (projection.workspaces.length === 0) {
             return (
@@ -340,13 +602,13 @@ export function MainPane({
     }
 
     const send = () => {
-        if (sending) return;
+        if (isInitializing || sending || !agent) return;
         const text = input.trim();
         if (!text && images.length === 0) return;
+        const userText = text || t("img.defaultPrompt");
         const params: AgentTextParams = {
             agentId: agent.id,
-            // 只有图片没有文字时，给 CLI 一句默认指令
-            text: text || t("img.defaultPrompt"),
+            text: userText,
             ...(images.length > 0
                 ? {
                       images: images.map((img): PromptImage => ({
@@ -356,6 +618,18 @@ export function MainPane({
                   }
                 : {}),
         };
+        // 乐观上屏：无论是否有图，立即以 ThreadRecord 渲染在对话流中
+        const optimisticRecord: ThreadRecord = {
+            id: `temp-u-${Date.now()}`,
+            role: "user",
+            text:
+                images.length > 0
+                    ? `${userText}\n\n${IMAGES_MARKER}\n${images.map((img) => img.name).join("\n")}`
+                    : userText,
+            at: Date.now(),
+        };
+        appendHistory(optimisticRecord);
+
         if (images.length > 0) {
             // base64 载荷可能有几 MB，发送期间禁用发送按钮
             setSending(true);
@@ -365,36 +639,75 @@ export function MainPane({
                     setImages([]);
                     setInput("");
                     setSending(false);
+                    fetchHistory(agent.id);
                 },
                 () => setSending(false), // 失败保留附件供重试
             );
         } else {
-            void call("agent.prompt", params);
             setInput("");
+            call("agent.prompt", params)
+                .then(() => fetchHistory(agent.id))
+                .catch(() => undefined);
         }
     };
 
-    const cfg = agent.config;
-    const workspace = projection.workspaces.find((w) => w.id === agent.workspaceId);
+    const cfg = agent?.config;
+    const workspace = projection.workspaces.find(
+        (w) => w.id === (agent ? agent.workspaceId : selectedWorkspaceId),
+    );
     const openEditor = () => {
         if (!workspace) return;
         const params: WorkspaceIdParams = { workspaceId: workspace.id };
         call("editor.open", params).catch(() => undefined);
     };
 
-    // pane 内容还很"空"且没有任何历史 → Codex 式 hero；有输出/历史后切回线程视图
-    const trivialPane = paneText === "" || (agent.turn === 0 && paneText.split("\n").length < 3);
-    const showHero = history.length === 0 && trivialPane;
+    const onRename = async () => {
+        if (!agent) return;
+        const next = await promptDialog({
+            title: t("agent.promptRename"),
+            defaultValue: agent.name,
+        });
+        if (next && next.trim() && next.trim() !== agent.name) {
+            await renameAgent(agent.id, next.trim());
+        }
+    };
+
+    // pane 内容还很"空"且没有任何历史 → Codex 式 hero；有输出/历史后切回流式视图
+    const trivialPane = paneText === "" || (agent?.turn === 0 && paneText.split("\n").length < 3);
+    const showHero = Boolean(agent && history.length === 0 && trivialPane && !isInitializing);
 
     return (
         <div className="main">
             <div className="pane-h">
-                <b>{agent.name}</b>
-                <span className={`pill ${statusClass(agent.status)}`}>● {agent.status}</span>
-                {agent.branch && <span className="pill branch">⎇ {agent.branch}</span>}
+                <div className="agent-title-wrap">
+                    <b
+                        className="agent-title-text"
+                        title={agent ? t("agent.promptRename") : ""}
+                        onDoubleClick={() => agent && void onRename()}
+                    >
+                        {activeName}
+                    </b>
+                    {agent && (
+                        <button
+                            className="chip-icon"
+                            title={t("agent.rename")}
+                            onClick={() => void onRename()}
+                        >
+                            ✎
+                        </button>
+                    )}
+                </div>
+                {isInitializing ? (
+                    <span className="pill working">
+                        <span className="pulse-indicator" /> {t("agent.connectingStatus")}
+                    </span>
+                ) : agent ? (
+                    <span className={`pill ${statusClass(agent.status)}`}>● {agent.status}</span>
+                ) : null}
+                {agent?.branch && <span className="pill branch">⎇ {agent.branch}</span>}
                 <div className="r">
-                    <span>turn #{agent.turn}</span>
-                    <span>checkpoint ✓</span>
+                    {agent && <span>turn #{agent.turn}</span>}
+                    {agent && <span>checkpoint ✓</span>}
                     {workspace?.cwd && (
                         <button className="chip" title={workspace.cwd} onClick={openEditor}>
                             ⧉ {t("main.openEditor")}
@@ -403,33 +716,117 @@ export function MainPane({
                     <button className="chip" onClick={() => setScreen("mesh")}>
                         {t("main.meshView")}
                     </button>
+                    {agent && !isInitializing && (
+                        <button
+                            className={`chip toggle-mode${showTerminal ? " active" : ""}`}
+                            onClick={() => setShowTerminal(!showTerminal)}
+                            title={showTerminal ? t("main.toggleChat") : t("main.toggleTerminal")}
+                        >
+                            {showTerminal ? `💬 ${t("main.toggleChat")}` : `▤ ${t("main.toggleTerminal")}`}
+                        </button>
+                    )}
                 </div>
             </div>
 
-            {showHero ? (
+            {isInitializing ? (
+                <div className="terminal-init-wrap">
+                    <div className="terminal-init-card">
+                        <div className="terminal-init-icon">
+                            <span className="pulse-halo" />
+                            <svg
+                                viewBox="0 0 24 24"
+                                width="36"
+                                height="36"
+                                stroke="currentColor"
+                                fill="none"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                            >
+                                <polyline points="4 17 10 11 4 5" />
+                                <line x1="12" y1="19" x2="20" y2="19" />
+                            </svg>
+                        </div>
+                        <div className="terminal-init-title">
+                            {initStage === "creating"
+                                ? t("agent.startingAgent", { name: activeName })
+                                : t("agent.connectingTerminal", { name: activeName })}
+                        </div>
+                        <div className="terminal-init-sub">
+                            {t("agent.connectingHint", { kind: activeKind })}
+                        </div>
+                        <div className="terminal-init-steps">
+                            <div className="init-step active done">
+                                <span className="step-icon">✓</span>
+                                <span className="step-text">{t("agent.stepPane")}</span>
+                            </div>
+                            <div
+                                className={`init-step ${initStage === "connecting" ? "active done" : "pending"}`}
+                            >
+                                <span className="step-icon">
+                                    {initStage === "connecting" ? "✓" : "2"}
+                                </span>
+                                <span className="step-text">{t("agent.stepSession")}</span>
+                            </div>
+                            <div className="init-step active running">
+                                <span className="step-icon spinner" />
+                                <span className="step-text">{t("agent.stepReady")}</span>
+                            </div>
+                        </div>
+                        <div className="terminal-init-bar">
+                            <div className="terminal-init-progress" />
+                        </div>
+                    </div>
+                </div>
+            ) : showHero ? (
                 <div className="hero">
                     <div className="hero-q">
-                        {t("main.heroTitle", { name: workspace?.label ?? agent.name })}
+                        {t("main.heroTitle", { name: workspace?.label ?? agent!.name })}
                     </div>
-                    <div className="hero-sub">{t("main.heroSub", { agent: agent.name })}</div>
+                    <div className="hero-sub">{t("main.heroSub", { agent: agent!.name })}</div>
                 </div>
+            ) : showTerminal ? (
+                <ThreadView history={history} paneText={paneText} agentId={agent!.id} />
             ) : (
-                <ThreadView history={history} paneText={paneText} agentId={agent.id} />
+                <StreamView
+                    history={history}
+                    paneText={paneText}
+                    agent={agent!}
+                    agentId={agent!.id}
+                />
             )}
 
-            <div className="composer-wrap">
+            <div className={`composer-wrap${isInitializing ? " disabled" : ""}`}>
                 <div className="cfgbar">
-                    <button className="cfgseg" onClick={() => openConfig(agent.id)}>
-                        <span className="ic">✳</span> {modelLabel(projection, agent)}{" "}
+                    <button
+                        className="cfgseg"
+                        disabled={isInitializing || !agent}
+                        onClick={() => agent && openConfig(agent.id)}
+                    >
+                        <span className="ic">✳</span>{" "}
+                        {agent ? modelLabel(projection, agent) : activeKind}{" "}
                         <span className="dn">▾</span>
                     </button>
-                    <button className="cfgseg" onClick={() => openConfig(agent.id)}>
-                        {reasoningLabel(cfg.reasoning)} · {ctxLabel(cfg.contextWindow)}{" "}
+                    <button
+                        className="cfgseg"
+                        disabled={isInitializing || !agent}
+                        onClick={() => agent && openConfig(agent.id)}
+                    >
+                        {agent && cfg
+                            ? `${reasoningLabel(cfg.reasoning)} · ${ctxLabel(cfg.contextWindow)}`
+                            : "normal · 200k"}{" "}
                         <span className="dn">▾</span>
                     </button>
-                    <button className="cfgseg" onClick={() => openConfig(agent.id)}>
-                        <span className="lock">{cfg.permissionMode === "full" ? "🔓" : "🔒"}</span>{" "}
-                        {permLabel(cfg.permissionMode)} <span className="dn">▾</span>
+                    <button
+                        className="cfgseg"
+                        disabled={isInitializing || !agent}
+                        onClick={() => agent && openConfig(agent.id)}
+                    >
+                        <span className="lock">
+                            {cfg?.permissionMode === "full" ? "🔓" : "🔒"}
+                        </span>{" "}
+                        {cfg ? permLabel(cfg.permissionMode) : "auto"}{" "}
+                        <span className="dn">▾</span>
                     </button>
                 </div>
                 {images.length > 0 && (
@@ -462,6 +859,7 @@ export function MainPane({
                     <button
                         className="attach-btn"
                         title={t("img.attach")}
+                        disabled={isInitializing}
                         onClick={() => fileRef.current?.click()}
                     >
                         📎
@@ -469,10 +867,16 @@ export function MainPane({
                     <textarea
                         ref={inputRef}
                         rows={1}
-                        placeholder={t("main.inputPlaceholder", { name: agent.name })}
+                        disabled={isInitializing}
+                        placeholder={
+                            isInitializing
+                                ? t("main.inputConnecting")
+                                : t("main.inputPlaceholder", { name: activeName })
+                        }
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onPaste={(e) => {
+                            if (isInitializing) return;
                             const files = Array.from(e.clipboardData.files).filter((f) =>
                                 f.type.startsWith("image/"),
                             );
@@ -482,6 +886,7 @@ export function MainPane({
                             }
                         }}
                         onKeyDown={(e) => {
+                            if (isInitializing) return;
                             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                                 e.preventDefault();
                                 send();
@@ -489,8 +894,12 @@ export function MainPane({
                         }}
                     />
                     <span className="hint">{t("main.kbdHint")}</span>
-                    <button className="send" onClick={send} disabled={sending}>
-                        {t("main.send")}
+                    <button
+                        className="send"
+                        onClick={send}
+                        disabled={isInitializing || sending}
+                    >
+                        {isInitializing ? t("main.initializingBtn") : t("main.send")}
                     </button>
                 </div>
             </div>

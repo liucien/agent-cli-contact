@@ -12,6 +12,7 @@ import type {
     AgentTextParams,
     AgentSendKeysParams,
     AgentCreateParams,
+    AgentRenameParams,
     AgentIdParams,
     AgentApplyConfigParams,
     ThreadSubscribeParams,
@@ -36,6 +37,7 @@ import type { ThreadLog } from "./threadLog.js";
 import { PROVIDER_CAPABILITIES } from "./capabilities.js";
 import { openInEditor } from "./editor.js";
 import { saveImages, withImagePaths } from "./attachments.js";
+import { getAvailableAgents } from "./setup.js";
 
 const PANE_POLL_MS = 1000;
 
@@ -86,6 +88,7 @@ export class GatewayServer {
             herdr: this.opts.getHerdrEnv(),
             workspaces: s?.runtime.listWorkspaces() ?? [],
             agents: s?.runtime.listAgents() ?? [],
+            availableAgents: getAvailableAgents(),
             schedules: s?.scheduler.snapshots() ?? [],
             mesh: {
                 messages: s?.mesh.messages.slice(-100) ?? [],
@@ -231,6 +234,20 @@ export class GatewayServer {
             case "agent.sendKeys": {
                 const { agentId, keys } = p as AgentSendKeysParams;
                 await s.runtime.sendKeys(agentId, keys);
+                setTimeout(() => {
+                    for (const [client, subs] of this.paneSubs) {
+                        if (subs.has(agentId)) {
+                            void this.pushPane(client, agentId);
+                        }
+                    }
+                }, 150);
+                setTimeout(() => {
+                    for (const [client, subs] of this.paneSubs) {
+                        if (subs.has(agentId)) {
+                            void this.pushPane(client, agentId);
+                        }
+                    }
+                }, 600);
                 return null;
             }
             case "agent.applyConfig": {
@@ -276,10 +293,16 @@ export class GatewayServer {
             }
 
             case "agent.create": {
-                const { workspaceId, name } = p as AgentCreateParams;
-                const created = await s.runtime.createAgent(workspaceId, name);
+                const { workspaceId, name, kind } = p as AgentCreateParams;
+                const created = await s.runtime.createAgent(workspaceId, name, kind);
                 this.broadcastShell();
                 return created;
+            }
+            case "agent.rename": {
+                const { agentId, name } = p as AgentRenameParams;
+                await s.runtime.renameAgent(agentId, name);
+                this.broadcastShell();
+                return null;
             }
             case "agent.remove": {
                 const { agentId } = p as AgentIdParams;
